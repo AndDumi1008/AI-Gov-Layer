@@ -34,7 +34,7 @@ make demo         # 28 scenario checks → evidence/
 make test         # policy + gateway unit tests
 ```
 
-Stack layout and seeded identities: [stack/README.md](../stack/README.md). Pipeline examples: [pipeline/](../pipeline/).
+Stack layout and seeded identities: [stack/README.md](../stack/README.md). Pipeline examples: [pipeline/](../pipeline/). SERVER deployment kit: [deploy/server/](../deploy/server/).
 
 ## How to read
 

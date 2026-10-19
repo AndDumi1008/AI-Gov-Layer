@@ -23,6 +23,8 @@ python3 stack/cli/agl login --as dana && python3 stack/cli/agl ask "hello" -c IN
 
 Seeded identities (dev issuer, `agl login --as <user>`): `dana` developer · `teo` team lead · `mira` budget owner/finance · `ines` security admin · `pawel` DPO · `sven` developer + platform admin (team payments, tiny budget) · `newbie` no training.
 
+Model weights: the in-stack `ollama` has no route to any registry; load weights with `deploy/server/pull-model.sh <model>` (one-off container sharing the volume). Local tier: set `AGL_LOCAL_BACKEND_URL=http://ollama:11434` and start with `--profile model`.
+
 Model aliases: `code-default` (external; `AGL_EXTERNAL_BACKEND=anthropic|mock`, evaluating under a 72 h exception) · `code-local` (self-hosted; CONFIDENTIAL goes here automatically).
 
 Claude Code on the Mac: `ANTHROPIC_BASE_URL=https://gateway.shortandsweet.home.ro` (or `http://127.0.0.1:4000` locally) and `ANTHROPIC_AUTH_TOKEN=$(cat ~/.agl/token)`.

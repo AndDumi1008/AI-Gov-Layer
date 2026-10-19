@@ -1,0 +1,14 @@
+{
+  "tagOwners": {
+    "tag:server": ["autogroup:admin"],
+    "tag:dev": ["autogroup:admin"]
+  },
+  "acls": [
+    { "action": "accept", "src": ["tag:dev"], "dst": ["tag:server:443", "tag:server:22"] },
+    { "action": "accept", "src": ["tag:dev"], "dst": ["tag:server:53"] }
+  ],
+  "ssh": [],
+  "tests": [
+    { "src": "tag:dev", "accept": ["tag:server:443", "tag:server:22"], "deny": ["tag:server:4000", "tag:server:5432", "tag:server:9000"] }
+  ]
+}

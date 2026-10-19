@@ -178,7 +178,7 @@ The PoC is accepted when every scenario below produces the expected result in a 
 
 ## 9.1 Status (2026-10-19)
 
-Tier 1 is implemented in `stack/` and verified on a laptop with the mock model: `demo/run-scenarios.sh` passes 28 checks covering S1–S14, S19–S23, S25 and S26; the sandbox shell denies, allows, requires a human and blocks egress with each attempt in the audit chain; the Anthropic streaming surface redacts and restores PII. Not yet exercised: a real local model (Ollama), a real Anthropic key through the egress proxy, SERVER deployment, Caddy TLS on the tailnet, Tier 2.
+Tier 1 is implemented in `stack/` and verified on a laptop with the mock model: `demo/run-scenarios.sh` passes 28 checks covering S1–S14, S19–S23, S25 and S26; the sandbox shell denies, allows, requires a human and blocks egress with each attempt in the audit chain; the Anthropic streaming surface redacts and restores PII. The real local tier is verified too: with the `model` profile, a CONFIDENTIAL request to `code-default` is rerouted to a Qwen coder model in Ollama and answered (CPU, ~5 s for a short prompt), cost 0, reroute recorded. Model weights are side-loaded into the Ollama volume by `deploy/server/pull-model.sh` because the in-stack Ollama has no route to any registry (PD-29). Not yet exercised: a real Anthropic key through the egress proxy, SERVER deployment, Caddy TLS on the tailnet, Tier 2. The SERVER deployment kit is in `deploy/server/`.
 
 ## 10. PoC infrastructure
 

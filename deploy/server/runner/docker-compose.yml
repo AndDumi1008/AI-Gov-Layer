@@ -1,0 +1,39 @@
+# Ephemeral GitHub Actions runner on SERVER (Tier 2, PD-18/PD-20). One job per container, Docker-in-Docker sidecar,
+# on ci-net (internet + tailnet), never on agl-net. Two instances: label `server` (PR/merge jobs) and
+# `server-release` (production job, the only one with a route into prod-net — add that network here when it exists).
+name: agl-ci
+networks:
+  ci-net: {}
+volumes:
+  dind-certs: {}
+services:
+  dind:
+    image: docker:27-dind
+    privileged: true          # required by dind; isolated from the host docker socket
+    environment: { DOCKER_TLS_CERTDIR: /certs }
+    volumes: [dind-certs:/certs/client]
+    networks: [ci-net]
+  runner:
+    image: ghcr.io/actions/actions-runner:2.323.0
+    depends_on: [dind]
+    environment:
+      DOCKER_HOST: tcp://dind:2376
+      DOCKER_TLS_VERIFY: "1"
+      DOCKER_CERT_PATH: /certs/client
+      RUNNER_LABELS: ${RUNNER_LABELS:-server}
+      REPO_URL: ${REPO_URL}              # https://github.com/<org>/<repo>
+      RUNNER_TOKEN: ${RUNNER_TOKEN}      # short-lived registration token: gh api -X POST repos/<org>/<repo>/actions/runners/registration-token
+    volumes: [dind-certs:/certs/client:ro]
+    networks: [ci-net]
+    # --ephemeral: the runner deregisters after ONE job; the loop re-registers with a fresh token.
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -e
+        while true; do
+          ./config.sh --unattended --url "$REPO_URL" --token "$RUNNER_TOKEN" --name "agl-$RUNNER_LABELS-$(hostname)" --labels "self-hosted,linux,$RUNNER_LABELS" --ephemeral --replace
+          ./run.sh || true
+          echo "job finished; container should be recreated for a clean state (restart: always does that)"
+          exit 0
+        done
+    restart: always

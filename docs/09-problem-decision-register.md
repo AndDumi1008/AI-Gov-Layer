@@ -57,6 +57,7 @@ IDs are `PD-xx`, chronological.
 | PD-26 | Object Lock protects versions, not keys: a plain delete adds a delete marker | verified | 2026-10-19 |
 | PD-27 | Gateway design for the PoC: own FastAPI service, non-streaming backends, synthesized SSE | decided | 2026-10-19 |
 | PD-28 | One anchor per day is wrong: anchors need a cut-off and a day may hold several | verified | 2026-10-19 |
+| PD-29 | The in-stack model server cannot pull weights; weights are side-loaded by an explicit job | verified | 2026-10-19 |
 
 ---
 
@@ -335,6 +336,15 @@ IDs are `PD-xx`, chronological.
 **Decision.** `audit_anchor.anchored_through timestamptz`, several anchors per day allowed; the anchor document and the verifier both use `closed_at <= anchored_through`. Nightly anchoring stays the norm; ad-hoc anchors (before an audit export, after an incident) are now harmless.
 **Pros.** Verifiable at any later time; evidence exports can anchor on demand. **Cons.** One more column and a dropped uniqueness constraint relative to document 05 (noted in §9 there).
 **Applied in.** `002_poc.sql`, `gateway/app/audit.py`. Verified: two consecutive scenario runs on one stack both pass S12.
+**Status.** verified.
+
+## PD-29 — Model weights enter through an explicit job
+
+**Problem.** `ollama pull` inside the stack fails: the Ollama container is on the internal network and cannot resolve or reach the model registry. Found when enabling the `model` profile locally.
+**Thought process.** This is the network design working. It also matches PD-08: weights are a supply chain and should not be fetched from inside the most trusted tier on demand. A one-off container that shares only the model volume (not the network) performs the pull; the operator sees what was fetched and can record the digest in the registry before approving the endpoint.
+**Decision.** `deploy/server/pull-model.sh` (one-off container with its own server process, shared `agl_ollama-models` volume). No egress allowlist entry for model registries. Registry `model.version` is to carry the weight digest (field exists; filling it is a Phase 1 task).
+**Pros.** Weights provenance is a visible step; the stack's network stays closed. **Cons.** Manual step per model update.
+**Applied in.** `deploy/server/pull-model.sh`, docs/07 §9.1. Verified: CONFIDENTIAL request answered by Qwen via `code-local` after side-loading.
 **Status.** verified.
 
 ---
