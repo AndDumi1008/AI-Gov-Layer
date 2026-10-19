@@ -1,0 +1,10 @@
+{
+  "agl": {
+    "config": {
+      "local_alias": "code-local",
+      "allowed_binaries": ["make", "npm", "pnpm", "yarn", "npx", "node", "python", "python3", "pytest", "pip", "go", "cargo", "git", "ls", "cat", "grep", "rg", "sed", "awk", "find", "echo", "cd", "pwd", "head", "tail", "wc", "diff", "mkdir", "touch", "cp", "mv", "rm", "supabase", "agl", "env", "printenv"],
+      "denied_patterns": ["(^|\\s)(kill|pkill|killall)\\s", "(^|\\s)sudo\\s", "(^|\\s)(curl|wget|nc|ssh|scp)\\s", "(^|\\s)(kubectl|helm|argocd|aws|gcloud|az|docker|podman)\\s", "(^|\\s)(mkfs|dd)\\s", "(^|\\s)(shutdown|reboot|systemctl)\\s", "git\\s+push\\s+\\S+\\s+(main|master|release)\\b", "gh\\s+pr\\s+(merge|review)", "--admin"],
+      "require_human_patterns": ["(^|\\s)rm\\s+-[a-zA-Z]*r", "git\\s+push", "pip\\s+install", "npm\\s+(i|install)", "supabase\\s+db\\s+push"]
+    }
+  }
+}

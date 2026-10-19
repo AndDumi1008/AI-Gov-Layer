@@ -26,6 +26,16 @@
 
 Every AI call goes through one EU-hosted gateway that knows the caller (SSO), the team, the approved models (registry with region and contract references), the data classification, what must not be sent (DLP), and how much may be spent (ledger with hard caps). Each call is written once to a hash-chained, WORM-protected audit store that holds no prompt text. AI may suggest code, but humans commit, humans review, humans approve production deploys, and only a GitOps controller writes to production, admitting only signed, provenance-attested artifacts. AI identities have no production permissions and no network path to production, and that is tested every quarter.
 
+## Run the PoC (Tier 1)
+
+```
+make bootstrap    # stack/ with the mock model; .env from .env.example
+make demo         # 28 scenario checks → evidence/
+make test         # policy + gateway unit tests
+```
+
+Stack layout and seeded identities: [stack/README.md](../stack/README.md). Pipeline examples: [pipeline/](../pipeline/).
+
 ## How to read
 
 - Start with the PRD §11 options overview and the Decision Log.

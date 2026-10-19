@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Pre-tool hook stand-in: every command the agent wants to run is sent to the gateway's action policy first.
+# Usage inside the sandbox: agl-shell "<command>"   (or interactive: agl-shell)
+set -u
+run_one() {
+  local cmd="$1"
+  local resp
+  resp=$(curl -fsS -X POST "$AGL_GATEWAY/agl/sandbox/action" -H "Authorization: Bearer $AGL_TOKEN" -H 'content-type: application/json' \
+         --data "$(jq -cn --arg c "$cmd" '{command:$c}')" 2>/dev/null) || { echo "[agl] governance unavailable — command not executed (fail closed)"; return 97; }
+  local outcome; outcome=$(echo "$resp" | jq -r .outcome)
+  case "$outcome" in
+    allow) bash -c "$cmd"; local rc=$?; curl -fsS -X POST "$AGL_GATEWAY/agl/sandbox/action/result" -H "Authorization: Bearer $AGL_TOKEN" -H 'content-type: application/json' \
+             --data "$(jq -cn --arg id "$(echo "$resp" | jq -r .event_id)" --argjson rc $rc '{event_id:$id, exit_code:$rc}')" >/dev/null 2>&1; return $rc;;
+    require_human) echo "[agl] needs a human: $(echo "$resp" | jq -r '.reasons|join(",")') — not executed by the agent; a developer runs it from the PR flow or security relaxes the rule via a policy PR (event $(echo "$resp" | jq -r .event_id))"; return 98;;
+    *) echo "[agl] denied: $(echo "$resp" | jq -r '.reasons|join(",")') (event $(echo "$resp" | jq -r .event_id))"; return 99;;
+  esac
+}
+if [ $# -gt 0 ]; then run_one "$*"; exit $?; fi
+echo "[agl] sandbox shell — every command is checked by policy before it runs. Ctrl-D to leave."
+while IFS= read -r -e -p 'agent$ ' line; do [ -n "$line" ] && run_one "$line"; done

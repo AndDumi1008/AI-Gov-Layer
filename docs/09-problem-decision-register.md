@@ -51,6 +51,12 @@ IDs are `PD-xx`, chronological.
 | PD-20 | GitHub at zero cost: public repositories in a free organisation, fork PRs kept off the self-hosted runner | applied | 2026-10-19 |
 | PD-21 | Frontend hosting: Docker on SERVER first, Vercel as optional variant | decided | 2026-10-19 |
 | PD-22 | SERVER is Windows 10 Pro with Docker Desktop (WSL 2) and a GTX 1070 | decided | 2026-10-19 |
+| PD-23 | Schema: `identity_role` primary key cannot hold org-wide roles; non-EU endpoints allowed only while `evaluating` | verified | 2026-10-19 |
+| PD-24 | MinIO public images no longer pullable; Bitnami legacy build used, pinned by digest | applied | 2026-10-19 |
+| PD-25 | Docker cannot publish ports from an internal network; Caddy becomes the only entry point | verified | 2026-10-19 |
+| PD-26 | Object Lock protects versions, not keys: a plain delete adds a delete marker | verified | 2026-10-19 |
+| PD-27 | Gateway design for the PoC: own FastAPI service, non-streaming backends, synthesized SSE | decided | 2026-10-19 |
+| PD-28 | One anchor per day is wrong: anchors need a cut-off and a day may hold several | verified | 2026-10-19 |
 
 ---
 
@@ -278,6 +284,58 @@ IDs are `PD-xx`, chronological.
 **Pros.** No OS change. **Cons.** Docker Desktop licensing for commercial use must be checked; the firewall, not Docker, is the binding control.
 **Applied in.** PoC §10.7.
 **Status.** decided.
+
+## PD-23 — Schema fixes found by loading the seed
+
+**Problem.** (a) `identity_role (identity_id, role, scope_team)` as primary key makes `scope_team` NOT NULL, so org-wide roles (security admin, DPO, finance) cannot be stored. (b) The Anthropic direct endpoint needed for the PoC cannot be inserted at all because the region check demands an EU country, yet PoC §10.5 decided to use it under an exception. Found when the seed file failed to load.
+**Fixes considered.** Sentinel team id for org-wide roles; or drop the composite key and use a unique index on `coalesce(scope_team, zero-uuid)`. For regions: fake an EU region (rejected: misrepresents residency); allow non-EU rows only while `status = 'evaluating'`, so they can never become approved, and add residency class `NON_EU_EVALUATING`.
+**Decision.** Unique index with coalesce; region check `EU list OR status = 'evaluating'`; new residency value. Both in `stack/schema/002_poc.sql`; the policy allows an evaluating model only under an active `model_enable` exception and records `exception_id` on every event.
+**Pros.** Honest registry: non-EU is visible as such and time-boxed. **Cons.** Document 05 and the migration now differ until the document is updated (note added there).
+**Applied in.** `002_poc.sql`, policy `agl.rego`, S14 (approved non-EU still rejected). Verified by load and by scenario.
+**Status.** verified.
+
+## PD-24 — MinIO images unavailable
+
+**Problem.** `minio/minio` on Docker Hub and `quay.io/minio/minio` both refuse anonymous pulls (401 / "repository does not exist"). Found at first `compose up`.
+**Fixes considered.** Bitnami legacy MinIO images (`bitnamilegacy/minio`, `bitnamilegacy/minio-client`), Zenko CloudServer, LocalStack, RustFS. All probed; all but Zenko and LocalStack untested for Object Lock semantics.
+**Decision.** Bitnami legacy MinIO, pinned by digest, with `mc` from the matching client image. Object Lock in COMPLIANCE mode confirmed working (S11). Production uses the cloud provider's object storage anyway (docs/07 §7).
+**Pros.** Same API and tooling as planned. **Cons.** "Legacy" means no further updates; acceptable for a PoC, must not be the production choice.
+**Status.** applied.
+
+## PD-25 — Internal networks cannot publish ports
+
+**Problem.** Services on the `internal: true` network (gateway, postgres, minio, opa) had `ports:` entries that Docker silently did not bind; the gateway was unreachable from the host.
+**Thought process.** Docker's rule is a feature: anything reachable from outside must sit on a non-internal network. Putting the gateway on such a network would give it a direct route to the internet and bypass the egress proxy. So the only non-internal services are Caddy (entry) and the egress proxy (exit).
+**Decision.** Remove all port publishing from internal services; Caddy is always on, publishes 443 (TLS, hostnames) and 4000 (plain HTTP → gateway, local/CLI use); `psql` for the DBA scenario runs through `docker compose exec`; MinIO consoles only via Caddy hostnames on the tailnet.
+**Pros.** The network diagram in docs/07 §10 is now literally enforced by Docker. **Cons.** Local debugging goes through Caddy or `compose exec`.
+**Applied in.** `stack/docker-compose.yml`, `caddy/Caddyfile`, `demo/run-scenarios.sh`. Verified: health through Caddy, S25 egress refused.
+**Status.** verified.
+
+## PD-26 — Object Lock protects versions, not keys
+
+**Problem.** `mc rm <object>` on a locked, versioned bucket succeeds by writing a delete marker; a later plain `GET` returns `NoSuchKey`, so the first verifier run crashed. Found by S11 followed by S12.
+**Thought process.** The data was never gone: the locked version is intact and `mc rm --versions --force` fails with "WORM protected". The verifier must read the newest real version explicitly, and a delete marker on an audit segment is itself evidence of a tampering attempt worth reporting.
+**Decision.** Verifier reads via `list_object_versions` + `get_object(VersionId=…)` and reports `delete_attempted` per segment; S11 deletes versions and expects "WORM protected"; documentation states that delete markers are expected noise and that retention is what matters.
+**Pros.** Verifier is robust and more informative. **Cons.** A WORM bucket can accumulate delete markers; the console must not mistake them for data loss.
+**Applied in.** `gateway/app/audit.py`, `demo/run-scenarios.sh`. Verified: S12 passes after a delete attempt and reports it.
+**Status.** verified.
+
+## PD-27 — Gateway implementation for the PoC
+
+**Problem.** D-06 left the gateway to a spike. The PoC needed deterministic behaviour (reserve/settle, hash chain, reroute by classification, quarantine, in-band reason codes) that an off-the-shelf gateway would need callbacks for.
+**Decision.** A small FastAPI gateway (~1,000 lines across modules) exposing both the OpenAI and Anthropic surfaces, calling backends non-streaming and synthesizing SSE for streaming clients so redaction can be reversed on the complete response. LiteLLM or Envoy AI Gateway remain candidates for Phase 1 behind the same policy and ledger.
+**Pros.** Every control is explicit and testable; Claude Code works through `ANTHROPIC_BASE_URL`. **Cons.** Streaming latency is the backend's full response time; no tool-use passthrough yet; one instance (no HA) in the PoC.
+**Applied in.** `stack/gateway/`. Verified: 28/28 scenarios locally, streaming on `/v1/messages` with redaction.
+**Status.** decided.
+
+## PD-28 — Daily anchor semantics
+
+**Problem.** `audit_anchor` was unique per date and the root hash covered "all segments closed that day". Running the anchor twice in a day kept the first root (insert ignored) while more segments closed, so verification failed with no tampering at all. Found on the second scenario run against the same stack.
+**Thought process.** An anchor is a statement "as of time T, the chain's segments up to T hash to R". Without T it cannot be re-verified once more segments exist. The production design (RFC 3161 timestamp) carries T implicitly; the schema did not.
+**Decision.** `audit_anchor.anchored_through timestamptz`, several anchors per day allowed; the anchor document and the verifier both use `closed_at <= anchored_through`. Nightly anchoring stays the norm; ad-hoc anchors (before an audit export, after an incident) are now harmless.
+**Pros.** Verifiable at any later time; evidence exports can anchor on demand. **Cons.** One more column and a dropped uniqueness constraint relative to document 05 (noted in §9 there).
+**Applied in.** `002_poc.sql`, `gateway/app/audit.py`. Verified: two consecutive scenario runs on one stack both pass S12.
+**Status.** verified.
 
 ---
 

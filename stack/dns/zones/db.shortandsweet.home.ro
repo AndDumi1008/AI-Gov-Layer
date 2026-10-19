@@ -1,0 +1,6 @@
+$ORIGIN shortandsweet.home.ro.
+$TTL 300
+@       IN SOA  ns.shortandsweet.home.ro. admin.shortandsweet.home.ro. ( 2026101901 3600 600 86400 300 )
+@       IN NS   ns.shortandsweet.home.ro.
+ns      IN A    100.64.0.1
+*       IN A    100.64.0.1

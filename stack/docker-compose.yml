@@ -1,0 +1,145 @@
+# AI Governance Layer — PoC Tier 1 stack (docs/07 §10)
+# Profiles: core (always), mock (mock model), model (ollama), edge (caddy + coredns), sandbox (image build)
+name: agl
+
+networks:
+  agl-net:
+    internal: true          # no route out and no published ports: reachable only via caddy; outbound only via egress-proxy
+  egress-net: {}            # egress-proxy's way out
+  edge-net: {}              # caddy + coredns, published on BIND_IP
+
+volumes:
+  pg-data: {}
+  minio-data: {}
+  anchor-data: {}
+  ollama-models: {}
+  caddy-data: {}
+  issuer-keys: {}
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      AGL_GATEWAY_DB_PASSWORD: ${AGL_GATEWAY_DB_PASSWORD}
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+      - ./schema:/docker-entrypoint-initdb.d:ro
+    networks: [agl-net]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  minio:
+    image: bitnamilegacy/minio@sha256:451fe6858cb770cc9d0e77ba811ce287420f781c7c1b806a386f6896471a349c   # MinIO (Bitnami legacy build; MinIO stopped publishing public images)
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes: [minio-data:/bitnami/minio/data]
+    networks: [agl-net]
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/127.0.0.1/9000'"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  minio-anchor:
+    image: bitnamilegacy/minio@sha256:451fe6858cb770cc9d0e77ba811ce287420f781c7c1b806a386f6896471a349c   # MinIO (Bitnami legacy build; MinIO stopped publishing public images)
+    environment:
+      MINIO_ROOT_USER: ${ANCHOR_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${ANCHOR_ROOT_PASSWORD}
+    volumes: [anchor-data:/bitnami/minio/data]
+    networks: [agl-net]
+
+  minio-init:
+    image: bitnamilegacy/minio-client@sha256:00dcc4e58ada0df45bb7d9ee435af98295f96c27c3c68292ce78ec700a87b511
+    depends_on:
+      minio: { condition: service_healthy }
+      minio-anchor: { condition: service_started }
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        set -e
+        until mc alias set audit http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null 2>&1; do sleep 1; done
+        until mc alias set anchor http://minio-anchor:9000 "$ANCHOR_ROOT_USER" "$ANCHOR_ROOT_PASSWORD" >/dev/null 2>&1; do sleep 1; done
+        mc mb --with-lock --ignore-existing audit/agl-audit
+        mc retention set --default COMPLIANCE "${AUDIT_RETENTION_DAYS}d" audit/agl-audit
+        mc mb --with-lock --ignore-existing anchor/agl-anchor
+        mc retention set --default COMPLIANCE "${AUDIT_RETENTION_DAYS}d" anchor/agl-anchor
+        echo "buckets ready (Object Lock COMPLIANCE, ${AUDIT_RETENTION_DAYS}d)"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      ANCHOR_ROOT_USER: ${ANCHOR_ROOT_USER}
+      ANCHOR_ROOT_PASSWORD: ${ANCHOR_ROOT_PASSWORD}
+      AUDIT_RETENTION_DAYS: ${AUDIT_RETENTION_DAYS}
+    networks: [agl-net]
+
+  opa:
+    image: openpolicyagent/opa:1.4.2-static
+    command: ["run", "--server", "--addr", ":8181", "--log-level", "info", "/policy"]
+    volumes: [./policy:/policy:ro]
+    networks: [agl-net]
+
+  egress-proxy:
+    image: ubuntu/squid:6.6-24.04_beta
+    volumes: [./proxy/squid.conf:/etc/squid/squid.conf:ro]
+    networks: [agl-net, egress-net]   # the ONLY service on both networks
+
+  mock-model:
+    build: ./mock-model
+    profiles: [mock]
+    networks: [agl-net]
+
+  ollama:
+    image: ollama/ollama:0.6.8
+    profiles: [model]
+    volumes: [ollama-models:/root/.ollama]
+    networks: [agl-net]
+    # On SERVER (NVIDIA): docker compose -f docker-compose.yml -f docker-compose.gpu.yml ...
+
+  gateway:
+    build: ./gateway
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://agl_gateway:${AGL_GATEWAY_DB_PASSWORD}@postgres:5432/postgres
+      OPA_URL: http://opa:8181
+      MINIO_URL: http://minio:9000
+      ANCHOR_URL: http://minio-anchor:9000
+      HTTPS_PROXY: http://egress-proxy:3128
+      NO_PROXY: postgres,opa,minio,minio-anchor,mock-model,ollama,localhost,127.0.0.1
+    volumes: [issuer-keys:/keys]
+    depends_on:
+      postgres: { condition: service_healthy }
+      minio-init: { condition: service_completed_successfully }
+      opa: { condition: service_started }
+    networks: [agl-net]
+
+  caddy:
+    # The only entry point from the host/tailnet into agl-net. Internal networks cannot publish ports,
+    # which is exactly the property we want for gateway, postgres, minio and opa.
+    image: caddy:2.9
+    env_file: .env
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    ports:
+      - "${BIND_IP}:443:443"
+      - "${BIND_IP}:4000:4000"
+    networks: [edge-net, agl-net]
+    depends_on: [gateway]
+
+  coredns:
+    image: coredns/coredns:1.12.1
+    profiles: [edge]
+    command: ["-conf", "/etc/coredns/Corefile"]
+    volumes:
+      - ./dns/Corefile:/etc/coredns/Corefile:ro
+      - ./dns/zones:/zones:ro
+    ports:
+      - "${BIND_IP}:53:53/udp"
+      - "${BIND_IP}:53:53/tcp"
+    networks: [edge-net]

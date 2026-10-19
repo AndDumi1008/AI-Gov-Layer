@@ -1,0 +1,24 @@
+# TLS from Caddy's internal CA; install the root on the Mac once (caddy trust / Keychain).
+{
+    local_certs
+}
+# plain HTTP for local development and the CLI (bound to BIND_IP by compose)
+:4000 {
+    reverse_proxy gateway:8000
+}
+gateway.{$DOMAIN} {
+    tls internal
+    reverse_proxy gateway:8000
+}
+opa.{$DOMAIN} {
+    tls internal
+    reverse_proxy opa:8181
+}
+minio.{$DOMAIN} {
+    tls internal
+    reverse_proxy minio:9001
+}
+anchor.{$DOMAIN} {
+    tls internal
+    reverse_proxy minio-anchor:9001
+}

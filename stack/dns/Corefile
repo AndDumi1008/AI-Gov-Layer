@@ -1,0 +1,6 @@
+# Serves the PoC zone to the tailnet. Point Tailscale split DNS for the domain at SERVER's Tailscale IP.
+shortandsweet.home.ro {
+    file /zones/db.shortandsweet.home.ro
+    log
+    errors
+}

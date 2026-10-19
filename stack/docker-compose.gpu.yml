@@ -1,0 +1,10 @@
+# Overlay for SERVER (Windows + WSL2 + NVIDIA): docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile model up -d
+services:
+  ollama:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

@@ -154,7 +154,7 @@ The PoC is accepted when every scenario below produces the expected result in a 
 |---------------|-----------------------|
 | Local JWT issuer with hardcoded users | Corporate IdP via OIDC + SCIM groups |
 | Ollama / mock model | EU-region provider endpoints and/or self-hosted vLLM fleet in EU |
-| MinIO with Object Lock | EU-region object storage with Object Lock or immutable blob, plus second-provider anchor and RFC 3161 |
+| MinIO with Object Lock (Bitnami legacy image, PD-24) | EU-region object storage with Object Lock or immutable blob, plus second-provider anchor and RFC 3161 |
 | Regex DLP | Regex + Presidio (multilingual) in-region |
 | Compose on a laptop | HA deployment on EU Kubernetes/VMs with EU KMS |
 | `kind` + Kyverno + manual Argo CD | Managed clusters, policy controller, GitOps per environment |
@@ -175,6 +175,10 @@ The PoC is accepted when every scenario below produces the expected result in a 
 | DLP false positives | Count false positives on synthetic but realistic prompts; informs observe → enforce timeline |
 | Latency overhead (NFR-03) | Measure p95 added by policy + DLP + ledger on the laptop; extrapolate |
 | Is a self-hosted tier needed in v1 (Q3) | Stakeholder reaction to the CONFIDENTIAL scenario (S4/S5) |
+
+## 9.1 Status (2026-10-19)
+
+Tier 1 is implemented in `stack/` and verified on a laptop with the mock model: `demo/run-scenarios.sh` passes 28 checks covering S1–S14, S19–S23, S25 and S26; the sandbox shell denies, allows, requires a human and blocks egress with each attempt in the audit chain; the Anthropic streaming surface redacts and restores PII. Not yet exercised: a real local model (Ollama), a real Anthropic key through the egress proxy, SERVER deployment, Caddy TLS on the tailnet, Tier 2.
 
 ## 10. PoC infrastructure
 

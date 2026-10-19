@@ -1,0 +1,121 @@
+#!/usr/bin/env python3
+"""agl — command-line client for the AI Governance Layer PoC.
+Config: AGL_URL (default http://127.0.0.1:4000), token in ~/.agl/token (agl login --as <user>)."""
+import os, sys, json, argparse, subprocess, pathlib, urllib.request, urllib.error
+
+URL = os.environ.get("AGL_URL", "http://127.0.0.1:4000").rstrip("/")
+TOKEN_FILE = pathlib.Path(os.environ.get("AGL_TOKEN_FILE", pathlib.Path.home() / ".agl" / "token"))
+
+def token():
+    t = os.environ.get("AGL_TOKEN")
+    if t:
+        return t
+    if TOKEN_FILE.exists():
+        return TOKEN_FILE.read_text().strip()
+    sys.exit("no token: run `agl login --as dana` (PoC dev issuer) or set AGL_TOKEN")
+
+def call(method, path, body=None, auth=True, headers=None, raw=False):
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(URL + path, data=data, method=method)
+    req.add_header("content-type", "application/json")
+    if auth:
+        req.add_header("authorization", "Bearer " + token())
+    for k, v in (headers or {}).items():
+        req.add_header(k, v)
+    try:
+        with urllib.request.urlopen(req, timeout=300) as r:
+            txt = r.read().decode()
+            return (r.status, dict(r.headers), txt if raw else (json.loads(txt) if txt else {}))
+    except urllib.error.HTTPError as e:
+        txt = e.read().decode()
+        try:
+            return (e.code, dict(e.headers), json.loads(txt))
+        except ValueError:
+            return (e.code, dict(e.headers), {"raw": txt})
+    except urllib.error.URLError as e:
+        sys.exit(f"cannot reach gateway at {URL}: {e.reason}")
+
+def out(status, body, headers=None):
+    print(json.dumps(body, indent=2, default=str))
+    if headers:
+        agl = {k: v for k, v in headers.items() if k.lower().startswith("x-agl")}
+        if agl:
+            print("—", json.dumps(agl))
+    sys.exit(0 if status < 400 else 1)
+
+def main():
+    p = argparse.ArgumentParser(prog="agl")
+    sub = p.add_subparsers(dest="cmd", required=True)
+    s = sub.add_parser("login", help="PoC: mint a dev token for a seeded user"); s.add_argument("--as", dest="user", required=True)
+    sub.add_parser("whoami"); sub.add_parser("models"); sub.add_parser("budget"); sub.add_parser("datasets")
+    s = sub.add_parser("ask", help="send a prompt through the gateway"); s.add_argument("prompt"); s.add_argument("--model", default="code-default")
+    s.add_argument("--classification", "-c"); s.add_argument("--repo", "-r"); s.add_argument("--surface", choices=["openai", "anthropic"], default="openai"); s.add_argument("--stream", action="store_true")
+    s = sub.add_parser("why", help="explain a decision"); s.add_argument("event_id")
+    s = sub.add_parser("events"); s.add_argument("--limit", type=int, default=20); s.add_argument("--type")
+    s = sub.add_parser("topup"); ts = s.add_subparsers(dest="sub", required=True)
+    r = ts.add_parser("request"); r.add_argument("amount", type=float); r.add_argument("justification"); r.add_argument("--scope", default="team")
+    a = ts.add_parser("approve"); a.add_argument("topup_id"); a.add_argument("--note", default="")
+    s = sub.add_parser("repo"); rs = s.add_subparsers(dest="sub", required=True)
+    x = rs.add_parser("show"); x.add_argument("name")
+    x = rs.add_parser("approve"); x.add_argument("name")
+    x = rs.add_parser("gate"); x.add_argument("name"); x.add_argument("item"); x.add_argument("value")
+    s = sub.add_parser("sandbox"); ss = s.add_subparsers(dest="sub", required=True)
+    n = ss.add_parser("new"); n.add_argument("repo"); n.add_argument("--dataset"); n.add_argument("--tool", default="claude-code"); n.add_argument("--run", help="run one command in the sandbox and exit"); n.add_argument("--no-docker", action="store_true", help="only mint the sandbox identity")
+    s = sub.add_parser("audit"); au = s.add_subparsers(dest="sub", required=True)
+    au.add_parser("flush"); au.add_parser("anchor"); v = au.add_parser("verify"); v.add_argument("--simulate-tamper", action="store_true")
+    args = p.parse_args()
+
+    if args.cmd == "login":
+        st, h, b = call("POST", "/agl/dev/mint", {"user": args.user}, auth=False)
+        if st >= 400: out(st, b)
+        TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True); TOKEN_FILE.write_text(b["token"]); TOKEN_FILE.chmod(0o600)
+        print(f"logged in as {args.user} (token in {TOKEN_FILE}, {b['expires_in_hours']} h)"); return
+    if args.cmd == "whoami": out(*call("GET", "/agl/whoami")[::2])
+    if args.cmd == "models": out(*call("GET", "/agl/models")[::2])
+    if args.cmd == "budget": out(*call("GET", "/agl/budget")[::2])
+    if args.cmd == "datasets": out(*call("GET", "/agl/datasets")[::2])
+    if args.cmd == "ask":
+        hdr = {}
+        if args.classification: hdr["x-agl-classification"] = args.classification
+        if args.repo: hdr["x-agl-repo"] = args.repo
+        if args.surface == "openai":
+            body = {"model": args.model, "messages": [{"role": "user", "content": args.prompt}], "max_tokens": 256, "stream": args.stream}
+            st, h, b = call("POST", "/v1/chat/completions", body, headers=hdr, raw=args.stream)
+        else:
+            body = {"model": args.model, "max_tokens": 256, "messages": [{"role": "user", "content": args.prompt}], "stream": args.stream}
+            st, h, b = call("POST", "/v1/messages", body, headers=hdr, raw=args.stream)
+        if args.stream and st < 400:
+            print(b); print("—", json.dumps({k: v for k, v in h.items() if k.lower().startswith("x-agl")})); sys.exit(0)
+        out(st, b, h)
+    if args.cmd == "why": out(*call("GET", f"/agl/events/{args.event_id}")[::2])
+    if args.cmd == "events":
+        q = f"?limit={args.limit}" + (f"&type={args.type}" if args.type else "")
+        out(*call("GET", "/agl/events" + q)[::2])
+    if args.cmd == "topup":
+        if args.sub == "request": out(*call("POST", "/agl/topup", {"amount_eur": args.amount, "justification": args.justification, "scope": args.scope})[::2])
+        if args.sub == "approve": out(*call("POST", f"/agl/topup/{args.topup_id}/approve", {"note": args.note})[::2])
+    if args.cmd == "repo":
+        if args.sub == "show": out(*call("GET", f"/agl/repo/{args.name}")[::2])
+        if args.sub == "approve": out(*call("POST", f"/agl/repo/{args.name}/approve", {})[::2])
+        if args.sub == "gate":
+            val = {"true": True, "false": False}.get(args.value.lower(), args.value)
+            out(*call("POST", f"/agl/repo/{args.name}/gate", {args.item: val})[::2])
+    if args.cmd == "sandbox" and args.sub == "new":
+        st, h, b = call("POST", "/agl/sandbox/new", {"repo": args.repo, "dataset": args.dataset, "tool": args.tool})
+        if st >= 400 or args.no_docker: out(st, b)
+        print(f"sandbox {b['sandbox_id']} for {b['repository']} (dataset: {b['dataset']}) — delegated token expires {b['expires_at']}")
+        docker = os.environ.get("DOCKER", "docker")
+        cmd = [docker, "run", "--rm", "-i" if args.run else "-it", "--name", b["sandbox_id"], "--network", "agl_agl-net", "--read-only", "--tmpfs", "/tmp", "--tmpfs", "/workspace:uid=10001",
+               "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--pids-limit", "256", "--memory", "2g",
+               "-e", f"AGL_TOKEN={b['token']}", "-e", f"AGL_SANDBOX={b['sandbox_id']}", "agl-sandbox:latest"]
+        if args.run: cmd.append(args.run)
+        rc = subprocess.call(cmd)
+        call("POST", f"/agl/sandbox/{b['sandbox_id']}/destroyed", {})
+        sys.exit(rc)
+    if args.cmd == "audit":
+        if args.sub == "flush": out(*call("POST", "/agl/audit/flush", {})[::2])
+        if args.sub == "anchor": out(*call("POST", "/agl/audit/anchor", {})[::2])
+        if args.sub == "verify": out(*call("GET", "/agl/audit/verify" + ("?simulate_tamper=true" if args.simulate_tamper else ""))[::2])
+
+if __name__ == "__main__":
+    main()

@@ -626,7 +626,17 @@ No role has UPDATE/DELETE on audit tables. Migrations run via a dedicated role i
 | DLP finding types/counts | with audit events | as above |
 | Agent action logs | 12 months | Security monitoring |
 
-## 9. Open schema questions
+## 9. PoC amendments (stack/schema/002_poc.sql)
+
+The PoC migration changes four things relative to the DDL above; fold them into §3 when this document is next revised (register PD-23):
+
+- `identity_role`: composite primary key replaced by a unique index on `(identity_id, role, coalesce(scope_team, '00000000-…'))` so org-wide roles can have `scope_team = null`.
+- `audit_event.seq bigint generated always as identity`: the chain order in the hot copy.
+- `model_endpoint` region check: `region_country in (EU/EEA/CH) OR status = 'evaluating'`; a non-EU endpoint can exist only while evaluating and only serves requests under an active `model_enable` exception. New `residency_class` value `NON_EU_EVALUATING`.
+- `budget_state(scope, scope_id)` function for the gateway's real-time check; the materialized view remains for dashboards.
+- `audit_anchor`: `unique(anchor_date)` dropped, `anchored_through timestamptz` added; an anchor covers segments closed up to that time (PD-28).
+
+## 10. Open schema questions
 
 - Per-identity envelopes (Q4): schema supports it via `envelope_scope='identity'`; decide whether to populate.
 - Whether `audit_event.body` should hold the full envelope or only indexed fields (storage vs convenience); default full for 90 days, then indexed-only.

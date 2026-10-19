@@ -20,3 +20,4 @@ dist/
 .vercel/
 __pycache__/
 *.pyc
+dns/zones/db.shortandsweet.home.ro
