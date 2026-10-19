@@ -22,6 +22,7 @@ Not included, configured in the GitHub UI or via Terraform:
 - `preview` environment: no reviewers; cloud credentials scoped to the preview cluster/namespace only; the cloud OIDC trust policy requires the `environment:preview` claim (PD-11).
 - Repository setting "allow GitHub Actions to approve pull requests" = **off**.
 - The `gitops` repository: branch protection allowing the GitHub App to push only digest bumps under `envs/*/kustomization.yaml` (PD-12).
+- Public repositories (PD-20): set "Fork pull request workflows → Require approval for all outside collaborators". `runs-on` sends fork PRs to `ubuntu-latest` and preview jobs are skipped for forks, so nothing from a fork executes on the self-hosted runner.
 - Ephemeral runners for PR-triggered workflows (PD-11); location per PD-16. PaaS production jobs read `AGL_RELEASE_RUNNER` (`server-release`), the only runner with a route into `prod-net`.
 - PaaS variant: `preview` environment secrets `PREVIEW_DB_URL`, `VERCEL_TOKEN`; `staging`: `STAGING_DB_URL`, `VERCEL_TOKEN`; `production`: `PROD_DB_URL`, `VERCEL_TOKEN`; repository variables `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`. Vercel's Git integration is disabled for production. Make targets: `preview-db-reset`, `db-compat-check`, `functions-deploy`, `e2e`, `contract-tests`, `staging-soak`. `runs-on` reads the repository variable `AGL_RUNNER` (set to `server` for the PoC's self-hosted runner on SERVER) and falls back to `ubuntu-latest`.
 - The AGL audit API verifies GitHub OIDC tokens (issuer, repository, workflow, ref) on `POST /events` (PD-13).

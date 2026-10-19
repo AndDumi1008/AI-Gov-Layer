@@ -22,7 +22,7 @@ permissions:
 jobs:
   prebuilt:
     name: prebuilt · hash · sign
-    runs-on: ${{ vars.AGL_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || vars.AGL_RUNNER || 'ubuntu-latest' }}
     permissions:
       contents: read
       id-token: write # keyless cosign for the blob signature (merge_group only)
@@ -66,7 +66,7 @@ jobs:
 
   migrations:
     name: migrations on preview stack (from current staging schema)
-    runs-on: ${{ vars.AGL_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || vars.AGL_RUNNER || 'ubuntu-latest' }}
     needs: [prebuilt]
     environment: preview # PREVIEW_DB_URL lives here; reaches preview-net only
     permissions:
@@ -86,9 +86,9 @@ jobs:
 
   preview:
     name: vercel preview (main + PR)
-    runs-on: ${{ vars.AGL_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || vars.AGL_RUNNER || 'ubuntu-latest' }}
     needs: [prebuilt, migrations]
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork
     environment:
       name: preview
       url: ${{ steps.deploy.outputs.url }}
@@ -128,7 +128,7 @@ jobs:
 
   evidence:
     name: audit evidence
-    runs-on: ${{ vars.AGL_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || vars.AGL_RUNNER || 'ubuntu-latest' }}
     needs: [prebuilt, migrations]
     if: always()
     permissions:

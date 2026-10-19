@@ -48,7 +48,7 @@ IDs are `PD-xx`, chronological.
 | PD-17 | Actions pinned to tags rather than commit SHAs | verified | 2026-10-19 |
 | PD-18 | Git hosting for the PoC: GitHub.com with a self-hosted runner on SERVER | applied | 2026-10-19 |
 | PD-19 | Demo application on self-hosted Supabase (SERVER) with Vercel frontend; release path without GitOps/kind | applied | 2026-10-19 |
-| PD-20 | GitHub plan: private repos need a paid plan; merge queue needs a Team organisation | open (recommendation given) | 2026-10-19 |
+| PD-20 | GitHub at zero cost: public repositories in a free organisation, fork PRs kept off the self-hosted runner | applied | 2026-10-19 |
 | PD-21 | Frontend hosting: Docker on SERVER first, Vercel as optional variant | decided | 2026-10-19 |
 | PD-22 | SERVER is Windows 10 Pro with Docker Desktop (WSL 2) and a GTX 1070 | decided | 2026-10-19 |
 
@@ -253,8 +253,10 @@ IDs are `PD-xx`, chronological.
 **Why it matters.** On a Free personal account the human-approval gate (S18) and the merge-queue signature design (PD-10) do not exist for private repositories.
 **Fixes considered.** (a) Organisation on the Team plan. (b) Personal account on Pro: rulesets and environments yes, merge queue no; sign on the push-to-main run instead. (c) Public repository with GitHub-hosted runners only: free, but previews cannot reach SERVER.
 **Thought process.** (a) costs two seats and keeps the design exact. (b) weakens "final merge result retested". (c) breaks the on-premises preview and the residency story.
-**Decision.** Open; recommendation (a). Owner: you. Needed before Tier 2.
-**Status.** open.
+**Decision (revised the same day).** The constraint is zero cost, so neither paid option applies. (d) **Public repositories in a free organisation**: rulesets, environments and merge queue are free there. The self-hosted-runner exposure that made us want private repositories is closed differently: fork pull requests require maintainer approval before any workflow runs, `runs-on` routes fork PRs to GitHub-hosted runners, preview jobs are skipped for forks, and fork runs get no secrets or write tokens by default. The repositories contain synthetic data and documentation only.
+**Pros.** €0; the pipeline files work exactly as written. **Cons.** Everything in the repositories is readable by anyone; the PD-11 condition "private repository" is replaced by four settings that must all stay in place.
+**Applied in.** PoC §10.5 and §10.7; workflows `pr-checks.yml`, `merge-candidate.yml`, `merge-candidate-paas.yml` (fork-aware `runs-on`, fork-skip on preview jobs). actionlint passes.
+**Status.** applied.
 
 ## PD-21 — Frontend hosting for the parcel app
 

@@ -26,7 +26,7 @@ env:
 jobs:
   build:
     name: build · sbom · attest
-    runs-on: ${{ vars.AGL_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || vars.AGL_RUNNER || 'ubuntu-latest' }}
     permissions:
       contents: read
       packages: write
@@ -80,7 +80,7 @@ jobs:
 
   migrations:
     name: migrations against current schema (masked snapshot)
-    runs-on: ${{ vars.AGL_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || vars.AGL_RUNNER || 'ubuntu-latest' }}
     services:
       db:
         image: index.docker.io/library/postgres@sha256:ca0bd484cb98bf4b24eb1010e73fb3fcbd6714d240fbc1a10eea5b7dbecb641d # ratchet:postgres:16
@@ -98,9 +98,9 @@ jobs:
 
   preview:
     name: preview environment (main + PR)
-    runs-on: ${{ vars.AGL_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || vars.AGL_RUNNER || 'ubuntu-latest' }}
     needs: [build, migrations]
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork
     # PD-11: credentials for this job come from the `preview` environment's secrets and
     # are scoped (cloud role / namespace) to the preview cluster only. The cloud OIDC
     # trust policy must require environment:preview in the token claims.
@@ -130,7 +130,7 @@ jobs:
 
   evidence:
     name: audit evidence
-    runs-on: ${{ vars.AGL_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || vars.AGL_RUNNER || 'ubuntu-latest' }}
     needs: [build, migrations]
     if: always()
     permissions:

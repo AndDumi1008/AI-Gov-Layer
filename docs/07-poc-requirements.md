@@ -379,7 +379,7 @@ Decided 2026-10-19 (register PD-18). The demo repository lives on GitHub.com so 
 
 | Item | Setting |
 |------|---------|
-| Repository | **private** (self-hosted runners must never serve a public repository: anyone could open a PR and run code on SERVER) |
+| Repository | **public**, in a free organisation (see PD-20); fork pull requests require maintainer approval and never run on the self-hosted runner |
 | Runner | `actions/runner` in a container on SERVER, registered at repository level with labels `self-hosted, linux, server`, started with `--ephemeral` so each job gets a fresh container; a supervisor loop re-registers after every job |
 | Runner network | `ci-net`: internet access for GitHub and `ghcr.io`; route to `registry`, `kind` and `gateway` on the tailnet; **no** membership in `agl-net` |
 | Docker for builds | a Docker-in-Docker sidecar per runner container (`docker:dind`) rather than the host socket, so a PR job cannot reach other containers on SERVER |
@@ -390,7 +390,7 @@ Decided 2026-10-19 (register PD-18). The demo repository lives on GitHub.com so 
 | Environments | `preview` (no reviewers, kind-scoped kubeconfig as secret), `staging` (no reviewers), `production` (required reviewers = the two humans on the PoC: author and a second account) |
 | What leaves SERVER | source code and PR metadata to GitHub.com, images to `ghcr.io`. This is the PD-16 trade-off, accepted for the PoC and recorded |
 
-PD-11 still applies with more force on a self-hosted runner: PR-triggered jobs execute the PR's own Makefile on your machine. Ephemeral runner + DinD + read-only token + private repository are the four conditions; if any is missing, run PR jobs on GitHub-hosted runners and keep only the merge-queue and release jobs on SERVER (`runs-on` can differ per job).
+PD-11 still applies with more force on a self-hosted runner: PR-triggered jobs execute the PR's own Makefile on your machine. Ephemeral runner + DinD + read-only token + fork-PR approval with fork jobs routed to hosted runners are the four conditions; if any is missing, run PR jobs on GitHub-hosted runners and keep only the merge-queue and release jobs on SERVER (`runs-on` can differ per job).
 
 ### Bring-up order
 
@@ -529,11 +529,30 @@ SERVER is a Windows 10 Pro machine (i7-7700, 64 GB RAM, NVIDIA GTX 1070 8 GB). C
 
 First iteration: the parcel frontend runs **in Docker on SERVER** behind Caddy (one container per environment: `web-preview`, `web-staging`, `web`), built once into a static export or a Node image and promoted by digest. No external PaaS account is needed and the "nothing leaves SERVER except code to GitHub" story holds. The Vercel variant (`merge-candidate-paas.yml`, `release-paas.yml`) stays in the repository as the PaaS demonstration and can be switched on later by setting the Vercel secrets; the production step then deploys the same prebuilt artifact to both or either.
 
-### GitHub organisation and plan (PD-20)
+### GitHub at zero cost: public repositories in a free organisation (PD-20)
 
-Rulesets, environments with required reviewers and the merge queue are available on **public** repositories for free, but on **private** repositories they need a paid plan, and the merge queue specifically needs an **organisation** on Team or Enterprise. Because a self-hosted runner must never serve a public repository (PD-11), the demo repositories must be private, so:
+Rulesets, environments with required reviewers and the merge queue are free on **public** repositories, and a GitHub organisation on the Free plan costs nothing. So the PoC repositories (`AI-Gov-Layer`, `parcel-app`) are **public**, in a free organisation, and everything in `pipeline/` works as written. There is nothing secret in them: synthetic data, no credentials, documentation that is meant to be read.
 
-- **Recommended:** create a GitHub organisation on the Team plan (per-seat, two seats: you and the reviewer account) and put `AI-Gov-Layer` (this repository) and `parcel-app` in it. Everything in `pipeline/` then works as written, and the organisation setting "Actions can approve pull requests" is turned off once for all repositories.
-- **Fallback:** personal account on GitHub Pro. Rulesets and environments work on private repositories; the merge queue does not. The workflows would then produce the release signature on the `push` to `main` run instead of the `merge_group` run, and the ruleset drops the `merge_queue` rule in favour of strict status checks. S16 still works; the "final merge result retested" property is weaker.
+The one thing a public repository changes is the self-hosted runner risk (PD-11): anyone can open a pull request from a fork. Four settings close it:
 
-Verify current plan features on GitHub's pricing page at the time of creation; they change.
+| Setting | Where | Effect |
+|---------|-------|--------|
+| Fork pull request workflows: **require approval for all outside collaborators** | Repository → Settings → Actions | No workflow runs for a fork PR until a maintainer clicks Approve |
+| Fork PRs never reach the self-hosted runner | Workflows: `runs-on` evaluates to `ubuntu-latest` when `github.event.pull_request.head.repo.fork` is true; preview jobs are skipped for forks | Even an approved fork PR runs on GitHub's machines, not on SERVER |
+| Secrets and write tokens are unavailable to fork PRs | GitHub default | Nothing to steal in a fork run |
+| Ephemeral runner with DinD, read-only default token | As in §10.5 | Same-repo PRs by the two known accounts execute on SERVER inside a throw-away container |
+
+The organisation setting "Allow GitHub Actions to create and approve pull requests" stays **off**.
+
+### Cost summary for the PoC
+
+| Item | Cost |
+|------|------|
+| GitHub (public repos, free org, hosted minutes for fork PRs, self-hosted runner) | €0 |
+| Tailscale (personal plan, 3 users, 100 devices) | €0 |
+| Docker Desktop on SERVER | €0 for personal use and small companies; check the licence terms for your company size |
+| Supabase (self-hosted containers) | €0 |
+| Local model (open weights on the GTX 1070) | €0 beyond electricity |
+| Caddy, CoreDNS, OPA, MinIO, Postgres | €0 |
+| Vercel | not used in the first iteration; Hobby tier is free but not for commercial use |
+| Anthropic API | pay per token; the budget ledger caps it; expect single-digit euros for the whole demo |

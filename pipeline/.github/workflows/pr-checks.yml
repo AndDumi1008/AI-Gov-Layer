@@ -21,7 +21,7 @@ concurrency:
 jobs:
   env-vars:
     name: env-vars
-    runs-on: ${{ vars.AGL_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || vars.AGL_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # ratchet:actions/checkout@v4
       - name: Declared-or-nonexistent, no .env, no secret defaults
@@ -29,7 +29,7 @@ jobs:
 
   secrets:
     name: secrets
-    runs-on: ${{ vars.AGL_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || vars.AGL_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # ratchet:actions/checkout@v4
         with: {fetch-depth: 0} # full history: a secret committed then removed is still a leak
@@ -39,21 +39,21 @@ jobs:
 
   lint:
     name: lint
-    runs-on: ${{ vars.AGL_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || vars.AGL_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # ratchet:actions/checkout@v4
       - run: make lint
 
   compile:
     name: compile
-    runs-on: ${{ vars.AGL_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || vars.AGL_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # ratchet:actions/checkout@v4
       - run: make build
 
   test:
     name: test
-    runs-on: ${{ vars.AGL_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || vars.AGL_RUNNER || 'ubuntu-latest' }}
     needs: [compile]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # ratchet:actions/checkout@v4
@@ -65,7 +65,7 @@ jobs:
 
   dependencies:
     name: dependencies
-    runs-on: ${{ vars.AGL_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || vars.AGL_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # ratchet:actions/checkout@v4
       - name: Vulnerability + licence scan
@@ -90,7 +90,7 @@ jobs:
 
   iac-policy:
     name: iac-policy
-    runs-on: ${{ vars.AGL_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || vars.AGL_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # ratchet:actions/checkout@v4
       - name: conftest on manifests and terraform
@@ -101,7 +101,7 @@ jobs:
 
   ai-label:
     name: ai-label
-    runs-on: ${{ vars.AGL_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || vars.AGL_RUNNER || 'ubuntu-latest' }}
     if: github.event_name == 'pull_request'
     permissions:
       contents: read
