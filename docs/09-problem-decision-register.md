@@ -48,6 +48,9 @@ IDs are `PD-xx`, chronological.
 | PD-17 | Actions pinned to tags rather than commit SHAs | verified | 2026-10-19 |
 | PD-18 | Git hosting for the PoC: GitHub.com with a self-hosted runner on SERVER | applied | 2026-10-19 |
 | PD-19 | Demo application on self-hosted Supabase (SERVER) with Vercel frontend; release path without GitOps/kind | applied | 2026-10-19 |
+| PD-20 | GitHub plan: private repos need a paid plan; merge queue needs a Team organisation | open (recommendation given) | 2026-10-19 |
+| PD-21 | Frontend hosting: Docker on SERVER first, Vercel as optional variant | decided | 2026-10-19 |
+| PD-22 | SERVER is Windows 10 Pro with Docker Desktop (WSL 2) and a GTX 1070 | decided | 2026-10-19 |
 
 ---
 
@@ -243,6 +246,36 @@ IDs are `PD-xx`, chronological.
 **Pros.** Real app, real RLS, real previews, simpler stack. **Cons.** Frontend code and build logs on Vercel; a release runner with a route to the production network must exist and is the most sensitive component on SERVER; Supabase self-hosting is a sizeable Compose stack per environment (memory).
 **Applied in.** PoC §10.6; `pipeline/.github/workflows/merge-candidate-paas.yml` and `release-paas.yml` (prebuilt artifact hashed and blob-signed in merge-queue runs only; release finds the merge-queue run for main's SHA, verifies the bundle by workflow, trigger and SHA, refuses preview markers; production job on the `server-release` runner compares migration checksums before `supabase db push`; frontend rollback by dispatch). Actions pinned by ratchet; linted with actionlint. Not yet run against a live repository.
 **Status.** applied.
+
+## PD-20 — GitHub plan for private demo repositories
+
+**Problem.** The pipeline relies on rulesets, environments with required reviewers and a merge queue. The repositories must be private because a self-hosted runner serves them (PD-11). On GitHub those features are free only for public repositories.
+**Why it matters.** On a Free personal account the human-approval gate (S18) and the merge-queue signature design (PD-10) do not exist for private repositories.
+**Fixes considered.** (a) Organisation on the Team plan. (b) Personal account on Pro: rulesets and environments yes, merge queue no; sign on the push-to-main run instead. (c) Public repository with GitHub-hosted runners only: free, but previews cannot reach SERVER.
+**Thought process.** (a) costs two seats and keeps the design exact. (b) weakens "final merge result retested". (c) breaks the on-premises preview and the residency story.
+**Decision.** Open; recommendation (a). Owner: you. Needed before Tier 2.
+**Status.** open.
+
+## PD-21 — Frontend hosting for the parcel app
+
+**Problem.** The frontend can be deployed by Vercel or run in Docker on SERVER. The request was to use external tools only when necessary.
+**Fixes considered.** (a) Vercel for all environments. (b) Docker on SERVER behind Caddy, one container per environment, promoted by digest. (c) Both, from the same prebuilt artifact.
+**Thought process.** (b) needs no account, keeps every byte on SERVER, and the artifact promotion mirrors the container variant already written. Vercel adds a realistic PaaS step but is not needed for any proof. The PaaS workflows already exist, so (c) is a configuration switch later.
+**Decision.** (b) first; Vercel variant kept dormant in the repository.
+**Pros.** Zero external dependencies for Tier 2 beyond GitHub. **Cons.** One less "real PaaS" demonstration until switched on.
+**Applied in.** PoC §10.7.
+**Status.** decided.
+
+## PD-22 — SERVER is Windows 10 Pro with Docker Desktop and a GTX 1070
+
+**Problem.** The stack was designed for a Linux Docker host. SERVER runs Windows 10 Pro; containers run in the WSL 2 backend of Docker Desktop.
+**Why it matters.** Control over SSH, binding to the Tailscale interface, GPU passthrough and memory limits behave differently.
+**Fixes considered.** Install Linux on SERVER; or adapt: OpenSSH Server on Windows + Docker context over SSH, Windows Firewall scoped to the Tailscale range, `.wslconfig` memory, CUDA on WSL for Ollama, all files in the WSL filesystem.
+**Thought process.** Reinstalling is a day of the user's time for little PoC benefit; the adaptations are small and documented. `internal` networks and the egress proxy work unchanged inside the VM, so the network proofs hold.
+**Decision.** Adapt. A 7–8 B Q4 model on the 1070 is the real local tier; nothing larger.
+**Pros.** No OS change. **Cons.** Docker Desktop licensing for commercial use must be checked; the firewall, not Docker, is the binding control.
+**Applied in.** PoC §10.7.
+**Status.** decided.
 
 ---
 

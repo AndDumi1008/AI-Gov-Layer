@@ -507,3 +507,33 @@ Vercel's own Git integration is **disabled** for production (and set to preview-
 - **Vercel** (US platform): receives the frontend source during build, the prebuilt bundle, build logs and the browser's requests for static assets. No backend data, no party data. Treated like GitHub in PD-16: acceptable for the PoC with synthetic code; a production decision for Phase 0.
 - **Supabase self-hosted**: no Supabase cloud account involved; the stacks are plain containers on SERVER. The Supabase MCP server available in this workspace is a cloud tool and is **not** used for the PoC backends; if used at all it is for a separate scratch project and never pointed at `prod-net`.
 - **Resources**: each Supabase stack is roughly 1.5–2 GB RAM; three stacks plus AGL plus a local model want 24 GB on SERVER, or drop the local model to a mock while the stacks are up.
+
+## 10.7 SERVER specifics: Windows 10 Pro, Docker Desktop, GTX 1070
+
+SERVER is a Windows 10 Pro machine (i7-7700, 64 GB RAM, NVIDIA GTX 1070 8 GB). Containers therefore run in Docker Desktop's WSL 2 backend. What that changes:
+
+| Topic | Consequence | What we do |
+|-------|-------------|------------|
+| Docker control from the Mac | Docker Desktop exposes the engine inside the WSL 2 VM; the Mac drives it over SSH | Enable Windows OpenSSH Server (you); the Docker CLI is on the Windows PATH, so `docker context create server --docker "host=ssh://<user>@server"` works from the Mac. Alternative: SSH into the WSL distro (`docker` works there too) |
+| Memory | WSL 2 VM takes a default share of RAM | Set `[wsl2] memory=40GB` in `%UserProfile%\.wslconfig` so three Supabase stacks + AGL + a model fit |
+| GPU | CUDA on WSL 2 works with Pascal cards; Docker Desktop passes the GPU through with `--gpus all` | Ollama container with `deploy.resources.reservations.devices` (gpu); a 7–8 B model at Q4 (≈5 GB) fits in 8 GB VRAM; nothing larger |
+| Binding only to the Tailscale IP | Docker Desktop publishes ports on the Windows host; binding to a specific host IP is supported but the Windows firewall is the reliable control | Publish Caddy on 443; add a Windows Firewall inbound rule allowing 443 and 22 **only** from `100.64.0.0/10` (Tailscale) and blocking them from the LAN. Nothing is forwarded on the home router |
+| `internal: true` networks | Work as on Linux (they live inside the WSL 2 VM) | Unchanged |
+| Egress proxy | Containers' default route goes through Docker Desktop's NAT to the Windows host | `agl-net` is internal, so only `egress-proxy` on `egress-net` can reach out; its allowlist is the control, as designed |
+| File paths and bind mounts | Windows paths and line endings | Keep all stack files inside the WSL 2 filesystem (`\\wsl$\...`) or in named volumes; `.gitattributes` with `* text=auto eol=lf` in the repo |
+| Self-hosted GitHub runner | Runs as a Linux container with a DinD sidecar inside WSL 2 | Unchanged from §10.5; label `server`; a second runner `server-release` on `release-net` |
+| DNS | No DNS software is running on SERVER today; the public `shortandsweet.home.ro` record points at the home WAN IP and has no subdomains | Run **CoreDNS** as a container bound to SERVER's Tailscale IP on port 53, serving the zone `shortandsweet.home.ro` with a wildcard to that IP; add a Tailscale split-DNS rule for the domain. The public apex record stays as it is and is not used |
+| Hardware trust | Consumer hardware, no TPM attestation, BitLocker optional | Fine for a PoC; the production replacement is region-pinned infrastructure under contract |
+
+### Frontend hosting decision (PD-21)
+
+First iteration: the parcel frontend runs **in Docker on SERVER** behind Caddy (one container per environment: `web-preview`, `web-staging`, `web`), built once into a static export or a Node image and promoted by digest. No external PaaS account is needed and the "nothing leaves SERVER except code to GitHub" story holds. The Vercel variant (`merge-candidate-paas.yml`, `release-paas.yml`) stays in the repository as the PaaS demonstration and can be switched on later by setting the Vercel secrets; the production step then deploys the same prebuilt artifact to both or either.
+
+### GitHub organisation and plan (PD-20)
+
+Rulesets, environments with required reviewers and the merge queue are available on **public** repositories for free, but on **private** repositories they need a paid plan, and the merge queue specifically needs an **organisation** on Team or Enterprise. Because a self-hosted runner must never serve a public repository (PD-11), the demo repositories must be private, so:
+
+- **Recommended:** create a GitHub organisation on the Team plan (per-seat, two seats: you and the reviewer account) and put `AI-Gov-Layer` (this repository) and `parcel-app` in it. Everything in `pipeline/` then works as written, and the organisation setting "Actions can approve pull requests" is turned off once for all repositories.
+- **Fallback:** personal account on GitHub Pro. Rulesets and environments work on private repositories; the merge queue does not. The workflows would then produce the release signature on the `push` to `main` run instead of the `merge_group` run, and the ruleset drops the `merge_queue` rule in favour of strict status checks. S16 still works; the "final merge result retested" property is weaker.
+
+Verify current plan features on GitHub's pricing page at the time of creation; they change.
