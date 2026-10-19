@@ -1,0 +1,210 @@
+# Release (PaaS variant) — parcel app: Supabase on SERVER + Vercel frontend.
+#
+# resolve     : find the merge_group run of merge-candidate-paas for THIS main commit, download
+#               its prebuilt artifact, verify the cosign blob signature came from that workflow on
+#               a merge_group run with this SHA (PD-10). No free-form inputs.
+# staging     : migrate the staging stack, deploy functions, deploy the SAME artifact to the
+#               staging alias on Vercel, soak.                              runner: server
+# release-notes: release candidate record incl. migration checksums and AI-assisted PRs.
+# production  : HUMAN approval on the `production` environment; then migration checksum
+#               comparison, supabase db push to the production stack, functions, vercel --prod
+#               of the same artifact.                                       runner: server-release
+#               (the only runner with a route into prod-net; its secrets are environment secrets)
+# rollback    : workflow_dispatch action=rollback-frontend → vercel rollback; the database is
+#               forward-only (expand/contract), so no automatic schema rollback exists.
+# PD-12: no long-lived tokens; VERCEL_TOKEN and DB URLs are environment secrets.
+# PD-13: audit events carry this workflow's OIDC token.
+name: release-paas
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "release (default) or rollback-frontend"
+        required: false
+        default: release
+        type: choice
+        options: [release, rollback-frontend]
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    name: resolve + verify prebuilt artifact
+    if: github.event.inputs.action != 'rollback-frontend'
+    runs-on: ${{ vars.AGL_RUNNER || 'ubuntu-latest' }}
+    permissions:
+      contents: read
+      actions: read # to find and download the merge_group run's artifact
+    outputs:
+      digest: ${{ steps.v.outputs.digest }}
+      run_id: ${{ steps.find.outputs.run_id }}
+    steps:
+      - name: Find the merge_group run that built this commit
+        id: find
+        env: {GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}"}
+        run: |
+          RID=$(gh run list --repo "${{ github.repository }}" --workflow merge-candidate-paas.yml \
+                --event merge_group --commit "${{ github.sha }}" --status success --json databaseId -q '.[0].databaseId')
+          [ -n "$RID" ] || { echo "::error::no successful merge_group run for ${{ github.sha }}"; exit 1; }
+          echo "run_id=$RID" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # ratchet:actions/download-artifact@v4
+        with:
+          name: prebuilt-${{ github.sha }}
+          run-id: ${{ steps.find.outputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # ratchet:sigstore/cosign-installer@v3
+      - name: Verify hash + signature origin (workflow, merge_group trigger, this SHA)
+        id: v
+        run: |
+          sha256sum -c prebuilt.sha256
+          [ ! -f preview.json ] || { echo "::error::artifact carries a preview marker; not releasable"; exit 1; }
+          cosign verify-blob --bundle prebuilt.bundle prebuilt.tar \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --certificate-identity-regexp "^https://github.com/${{ github.repository }}/.github/workflows/merge-candidate-paas.yml@refs/heads/gh-readonly-queue/main/.*$" \
+            --certificate-github-workflow-repository "${{ github.repository }}" \
+            --certificate-github-workflow-trigger merge_group \
+            --certificate-github-workflow-sha "${{ github.sha }}"
+          echo "digest=sha256:$(cut -d' ' -f1 prebuilt.sha256)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # ratchet:actions/upload-artifact@v4
+        with:
+          name: release-${{ github.sha }}
+          path: |
+            prebuilt.tar
+            prebuilt.sha256
+            migrations.sha256
+            prebuilt.bundle
+          retention-days: 90
+
+  staging:
+    name: staging (automatic)
+    runs-on: ${{ vars.AGL_RUNNER || 'ubuntu-latest' }}
+    needs: [resolve]
+    environment: {name: staging, url: 'https://staging.parcel.shortandsweet.home.ro'}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # ratchet:actions/checkout@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # ratchet:actions/download-artifact@v4
+        with:
+          name: release-${{ github.sha }}
+      - run: sha256sum -c prebuilt.sha256 && mkdir -p .vercel && tar -C .vercel -xf prebuilt.tar
+      - uses: supabase/setup-cli@1dedf2c611547ede7232d26866dd3c56ab903bbb # ratchet:supabase/setup-cli@v1
+        with: {version: "2.x"}
+      - name: Migrate staging stack (forward only) + functions
+        run: |
+          supabase db push --db-url "${{ secrets.STAGING_DB_URL }}" --include-all
+          make functions-deploy ENV=staging
+      - name: Deploy the same artifact to the staging alias
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+        run: |
+          URL=$(npx vercel@39 deploy --prebuilt --yes --token "$VERCEL_TOKEN" \
+                --env AGL_BACKEND_URL=https://staging-api.shortandsweet.home.ro --meta sha=${{ github.sha }})
+          npx vercel@39 alias set "$URL" staging.parcel.shortandsweet.home.ro --token "$VERCEL_TOKEN"
+      - name: Soak (SLO checks against staging)
+        run: make staging-soak BASE_URL=https://staging.parcel.shortandsweet.home.ro MINUTES=30
+
+  release-notes:
+    name: release candidate record
+    runs-on: ${{ vars.AGL_RUNNER || 'ubuntu-latest' }}
+    needs: [resolve, staging]
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # ratchet:actions/checkout@v4
+        with: {fetch-depth: 0}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # ratchet:actions/download-artifact@v4
+        with:
+          name: release-${{ github.sha }}
+      - name: Draft the record; migrations with checksums; AI-assisted PRs listed separately
+        env: {GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}"}
+        run: |
+          PREV=$(git describe --tags --abbrev=0 2>/dev/null || git rev-list --max-parents=0 HEAD)
+          SINCE=$(git log -1 --format=%cI "$PREV")
+          {
+            echo "## Release candidate ${{ github.sha }}"
+            echo "Frontend artifact: ${{ needs.resolve.outputs.digest }} (cosign-verified, merge_group run ${{ needs.resolve.outputs.run_id }})"
+            echo; echo "### Migrations that will run in production"; sed 's/^/- /' migrations.sha256
+            echo; echo "### Changes"
+            gh pr list --state merged --search "merged:>=$SINCE" --json number,title,labels \
+              -q '.[] | select(.labels|map(.name)|index("ai-assisted")|not) | "- #\(.number) \(.title)"'
+            echo; echo "### AI-assisted changes (reviewed by humans)"
+            gh pr list --state merged --search "merged:>=$SINCE" --json number,title,labels \
+              -q '.[] | select(.labels|map(.name)|index("ai-assisted")) | "- #\(.number) \(.title)"'
+          } > RELEASE_CANDIDATE.md
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # ratchet:actions/upload-artifact@v4
+        with:
+          name: release-candidate-${{ github.sha }}
+          path: RELEASE_CANDIDATE.md
+
+  production:
+    name: production (human approval required)
+    runs-on: ${{ vars.AGL_RELEASE_RUNNER || 'ubuntu-latest' }} # the only runner with a route into prod-net
+    needs: [resolve, staging, release-notes]
+    # `production` environment: required reviewers = humans only; secrets below are ENVIRONMENT
+    # secrets and do not exist until a human approves.
+    environment: {name: production, url: 'https://parcel.shortandsweet.home.ro'}
+    permissions:
+      contents: read
+      id-token: write # PD-13 audit post
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # ratchet:actions/checkout@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # ratchet:actions/download-artifact@v4
+        with:
+          name: release-${{ github.sha }}
+      - name: Re-verify the artifact on the release runner
+        run: sha256sum -c prebuilt.sha256 && mkdir -p .vercel && tar -C .vercel -xf prebuilt.tar
+      - name: Migration checksums must equal what was tested and approved
+        run: ( cd supabase/migrations && sha256sum -- *.sql ) | diff - migrations.sha256
+      - uses: supabase/setup-cli@1dedf2c611547ede7232d26866dd3c56ab903bbb # ratchet:supabase/setup-cli@v1
+        with: {version: "2.x"}
+      - name: Migrate PRODUCTION (forward only) + functions
+        run: |
+          supabase db push --db-url "${{ secrets.PROD_DB_URL }}" --include-all
+          make functions-deploy ENV=production
+      - name: Deploy the same artifact to production on Vercel
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+        run: npx vercel@39 deploy --prebuilt --prod --yes --token "$VERCEL_TOKEN" --env AGL_BACKEND_URL=https://api.shortandsweet.home.ro --meta sha=${{ github.sha }}
+      - name: Record deploy event in the AGL audit chain (OIDC-authenticated)
+        env: {AGL_AUDIT_URL: "${{ vars.AGL_AUDIT_URL }}"}
+        run: |
+          [ -z "$AGL_AUDIT_URL" ] && { echo "AGL_AUDIT_URL not set; skipping"; exit 0; }
+          IDTOKEN=$(curl -fsS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+                    "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=agl-audit" | jq -r .value)
+          curl -fsS -X POST "$AGL_AUDIT_URL/events" -H "Authorization: Bearer $IDTOKEN" -H 'content-type: application/json' -d @- <<JSON
+          {"type":"deploy_event","variant":"paas","environment":"production","repo":"${{ github.repository }}","sha":"${{ github.sha }}","digest":"${{ needs.resolve.outputs.digest }}","migrations_sha256":"$(sha256sum migrations.sha256 | cut -d' ' -f1)","run":"${{ github.run_id }}","approver":"${{ github.triggering_actor }}"}
+          JSON
+
+  rollback-frontend:
+    name: rollback frontend (human approval required)
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'rollback-frontend'
+    runs-on: ${{ vars.AGL_RELEASE_RUNNER || 'ubuntu-latest' }}
+    environment: {name: production, url: 'https://parcel.shortandsweet.home.ro'}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Vercel rollback to the previous production deployment
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+        run: npx vercel@39 rollback --yes --token "$VERCEL_TOKEN"
+      - name: Record rollback event
+        env: {AGL_AUDIT_URL: "${{ vars.AGL_AUDIT_URL }}"}
+        run: |
+          [ -z "$AGL_AUDIT_URL" ] && { echo "AGL_AUDIT_URL not set; skipping"; exit 0; }
+          IDTOKEN=$(curl -fsS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+                    "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=agl-audit" | jq -r .value)
+          curl -fsS -X POST "$AGL_AUDIT_URL/events" -H "Authorization: Bearer $IDTOKEN" -H 'content-type: application/json' \
+            -d "{\"type\":\"deploy_event\",\"variant\":\"paas\",\"environment\":\"production\",\"deploy_type\":\"rollback\",\"scope\":\"frontend\",\"run\":\"${{ github.run_id }}\",\"approver\":\"${{ github.triggering_actor }}\"}"

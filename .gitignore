@@ -1,0 +1,22 @@
+# secrets and local config — never committed
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.bundle.local
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+
+# runtime output
+evidence/*
+!evidence/.gitkeep
+node_modules/
+dist/
+.vercel/
+__pycache__/
+*.pyc

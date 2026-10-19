@@ -1,0 +1,10 @@
+# Sensitive paths need an approval from the owning group in addition to the normal review.
+# Rulesets require CODEOWNERS review, so an ai-assisted PR touching these gets two humans.
+/deploy/            @example-org/platform
+/infra/             @example-org/platform
+/policy/            @example-org/security
+/db/migrations/     @example-org/data-owners
+/src/auth/          @example-org/security
+/src/payments/      @example-org/security @example-org/payments
+/.github/           @example-org/platform @example-org/security
+/.env.example       @example-org/platform

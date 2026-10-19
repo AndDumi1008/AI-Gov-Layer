@@ -1,0 +1,378 @@
+<title>Parcel Data Journey</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a waybill. Stage rail on top, three panes below: what happens / what each role sees / the ledger. */
+:root{
+  --bg:#f3f5f6; --surface:#ffffff; --fg:#17222c; --muted:#5b6b78; --line:#d6dde3;
+  --accent:#0e6f7a; --accent-ink:#ffffff; --pii:#b8690a; --pii-bg:#fff4e3;
+  --good:#1f7a3f; --warn:#b26a00; --bad:#b3261e; --bad-bg:#fde9e7; --good-bg:#e6f4ea;
+  --redact:#3b4a57; --redact-bg:#e6ebef; --eu:#1c4e9d; --eu-bg:#e7eefb;
+  --display:"Barlow Condensed","Arial Narrow",sans-serif;
+  --body:"IBM Plex Sans","Helvetica Neue",Arial,sans-serif;
+  --mono:"IBM Plex Mono","SFMono-Regular",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#101619; --surface:#182026; --fg:#e8edf0; --muted:#97a6b2; --line:#2b3740;
+  --accent:#3fb3bf; --accent-ink:#071114; --pii:#f0a942; --pii-bg:#3a2a12;
+  --good:#5ccf84; --warn:#f2b34d; --bad:#ff7b72; --bad-bg:#3d1c19; --good-bg:#15311f;
+  --redact:#aebbc6; --redact-bg:#243039; --eu:#8fb3f5; --eu-bg:#1b2a44; color-scheme:dark }}
+:root[data-theme="dark"]{
+  --bg:#101619; --surface:#182026; --fg:#e8edf0; --muted:#97a6b2; --line:#2b3740;
+  --accent:#3fb3bf; --accent-ink:#071114; --pii:#f0a942; --pii-bg:#3a2a12;
+  --good:#5ccf84; --warn:#f2b34d; --bad:#ff7b72; --bad-bg:#3d1c19; --good-bg:#15311f;
+  --redact:#aebbc6; --redact-bg:#243039; --eu:#8fb3f5; --eu-bg:#1b2a44; color-scheme:dark }
+
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--body);line-height:1.45;
+  padding-block:20px 48px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.wrap{max-width:1280px;margin:0 auto;display:grid;gap:18px}
+h1,h2,h3{font-family:var(--display);text-wrap:balance;margin:0;letter-spacing:.01em}
+h1{font-size:clamp(30px,4.5vw,44px);line-height:1;text-transform:uppercase}
+h2{font-size:22px;text-transform:uppercase;color:var(--muted);font-weight:600;letter-spacing:.06em}
+h3{font-size:20px}
+p{margin:0}
+.muted{color:var(--muted)}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+header{display:flex;flex-wrap:wrap;gap:12px 24px;align-items:flex-end;justify-content:space-between;border-bottom:2px solid var(--fg);padding-bottom:12px}
+header .lead{max-width:62ch;color:var(--muted)}
+.badges{display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-family:var(--mono);font-size:12px;padding:4px 8px;border:1px solid var(--line);border-radius:3px;background:var(--surface)}
+.badge.eu{border-color:var(--eu);color:var(--eu);background:var(--eu-bg)}
+
+/* stage rail */
+.rail{display:grid;grid-template-columns:repeat(9,minmax(0,1fr));gap:4px;overflow-x:auto}
+.rail button{all:unset;cursor:pointer;display:grid;gap:4px;padding:10px 8px;border-top:4px solid var(--line);min-width:0}
+.rail button .n{font-family:var(--mono);font-size:11px;color:var(--muted)}
+.rail button .t{font-family:var(--display);font-size:17px;line-height:1.05;text-transform:uppercase}
+.rail button[aria-current="step"]{border-top-color:var(--accent)}
+.rail button.visited{border-top-color:var(--fg)}
+.rail button[aria-current="step"]{border-top-color:var(--accent)}
+.rail button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.rail button .ai{font-size:11px;color:var(--pii);font-family:var(--mono)}
+@media (max-width:860px){.rail{grid-template-columns:repeat(9,140px)}}
+
+.controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:space-between}
+.btn{font:500 14px var(--body);padding:8px 14px;border:1px solid var(--fg);background:var(--surface);color:var(--fg);border-radius:3px;cursor:pointer}
+.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.btn.danger{border-color:var(--bad);color:var(--bad)}
+.btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.btn:disabled{opacity:.45;cursor:default}
+label.sel{display:flex;gap:8px;align-items:center;font-size:14px}
+select{font:14px var(--body);padding:7px 10px;border:1px solid var(--line);background:var(--surface);color:var(--fg);border-radius:3px}
+
+.panes{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1.3fr) minmax(0,1fr);gap:18px}
+@media (max-width:1080px){.panes{grid-template-columns:1fr 1fr}.ledger{grid-column:1/-1}}
+@media (max-width:700px){.panes{grid-template-columns:1fr}}
+.pane{background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:16px;display:grid;gap:12px;align-content:start;min-width:0}
+.pane h2{font-size:14px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:14px}
+.kv dt{color:var(--muted)}
+.kv dd{margin:0;min-width:0}
+ul.plain{margin:0;padding-left:18px;font-size:14px;display:grid;gap:4px}
+
+/* record table */
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-family:var(--mono);font-weight:500;font-size:11px;color:var(--muted);letter-spacing:.06em;text-transform:uppercase}
+td.val{font-family:var(--mono);word-break:break-word}
+.tscroll{overflow-x:auto}
+.chip{display:inline-block;font-family:var(--mono);font-size:11px;padding:2px 6px;border-radius:3px;border:1px solid transparent;white-space:nowrap}
+.m-full{background:var(--pii-bg);color:var(--pii);border-color:var(--pii)}
+.m-masked,.m-partial,.m-relay,.m-geo,.m-pseudo,.m-token{background:var(--eu-bg);color:var(--eu)}
+.m-redacted,.m-hash{background:var(--redact-bg);color:var(--redact)}
+.m-none,.m-erased{color:var(--muted)}
+.m-erased{text-decoration:line-through}
+td.val.m-none{color:var(--muted)}
+.pii-tag{font-family:var(--mono);font-size:10px;color:var(--pii)}
+
+/* matrix */
+.matrix td{text-align:center;padding:5px 4px}
+.matrix td:first-child,.matrix th:first-child{text-align:left}
+.matrix th.cur,.matrix td.cur{background:var(--eu-bg)}
+.dot{display:inline-block;width:20px;font-family:var(--mono);font-size:11px;padding:2px 0;border-radius:3px}
+
+/* AI panel */
+.prompt{font-family:var(--mono);font-size:12.5px;white-space:pre-wrap;background:var(--bg);border:1px solid var(--line);padding:10px;border-radius:3px;line-height:1.5}
+.prompt .tok{background:var(--redact-bg);color:var(--redact);padding:0 3px;border-radius:2px}
+.decision{display:grid;grid-template-columns:auto 1fr;gap:3px 10px;font-size:12.5px;font-family:var(--mono)}
+.decision dt{color:var(--muted)}
+.decision dd{margin:0}
+.ok{color:var(--good)} .warnc{color:var(--warn)} .badc{color:var(--bad)}
+
+/* ledger */
+.ledger .ev{border-left:3px solid var(--fg);padding:6px 10px;display:grid;gap:2px;font-size:12.5px}
+.ledger .ev.tampered{border-left-color:var(--bad);background:var(--bad-bg)}
+.ledger .ev.broken{border-left-color:var(--warn)}
+.ledger .ev .h{font-family:var(--mono);font-size:11px;color:var(--muted);word-break:break-all}
+.ledger .ev .ty{font-family:var(--mono);font-weight:500}
+.ledger .list{display:grid;gap:6px;max-height:520px;overflow:auto}
+.verdict{font-family:var(--mono);font-size:13px;padding:8px 10px;border-radius:3px;border:1px solid var(--line)}
+.verdict.pass{background:var(--good-bg);color:var(--good);border-color:var(--good)}
+.verdict.fail{background:var(--bad-bg);color:var(--bad);border-color:var(--bad)}
+.note{font-size:13px;color:var(--muted);border-top:1px dashed var(--line);padding-top:8px}
+.legend{display:flex;flex-wrap:wrap;gap:8px;font-size:12px;align-items:center}
+footer{font-size:13px;color:var(--muted);max-width:80ch}
+@media (prefers-reduced-motion:no-preference){.ledger .ev{animation:in .25s ease-out}}
+@keyframes in{from{opacity:.3;transform:translateY(4px)}to{opacity:1;transform:none}}
+</style>
+
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Parcel Data Journey</h1>
+      <p class="lead">One parcel, Cluj-Napoca to Munich. Follow what the software does at each step, how the sender's and recipient's personal data looks to each role and to the AI gateway, and how every step lands in a ledger nobody can edit.</p>
+    </div>
+    <div class="badges">
+      <span class="badge eu">Processing: EU only · RO / DE</span>
+      <span class="badge">Example data · nobody real</span>
+      <span class="badge">Companion: <a href="https://claude.ai/artifact/T4uHMFfa9N6Za9aCXUDjzC" style="color:var(--accent)">Code to Production Journey</a></span>
+    </div>
+  </header>
+
+  <nav class="rail" id="rail" aria-label="Stages"></nav>
+
+  <div class="controls">
+    <div style="display:flex;gap:8px">
+      <button class="btn" id="prev">◀ Previous</button>
+      <button class="btn primary" id="next">Next stage ▶</button>
+    </div>
+    <label class="sel" for="lens">View the data as
+      <select id="lens"></select>
+    </label>
+  </div>
+
+  <div class="panes">
+    <section class="pane" aria-labelledby="st-h">
+      <h2>What happens</h2>
+      <h3 id="st-h"></h3>
+      <p id="st-desc" style="font-size:14px"></p>
+      <dl class="kv" id="st-kv"></dl>
+      <div id="ai-block" hidden>
+        <h2 style="margin-top:6px">AI touchpoint · via gateway</h2>
+        <p id="ai-purpose" style="font-size:13px;margin:6px 0"></p>
+        <div class="prompt" id="ai-prompt"></div>
+        <dl class="decision" id="ai-decision" style="margin-top:8px"></dl>
+      </div>
+      <div id="noai" class="note">No AI call at this stage.</div>
+    </section>
+
+    <section class="pane" aria-labelledby="rec-h">
+      <h2 id="rec-h">The record as <span id="lens-name"></span> sees it</h2>
+      <p id="lens-desc" class="muted" style="font-size:13px"></p>
+      <div class="tscroll"><table id="rec"><thead><tr><th>Field</th><th>Value for this role</th><th>State</th></tr></thead><tbody></tbody></table></div>
+      <h2 style="margin-top:4px">All roles at this stage</h2>
+      <div class="tscroll"><table class="matrix" id="matrix"></table></div>
+      <div class="legend">
+        <span class="chip m-full">full</span><span class="chip m-masked">masked</span><span class="chip m-partial">partial</span><span class="chip m-relay">relay</span><span class="chip m-geo">geo ±100 m</span><span class="chip m-pseudo">pseudonym</span><span class="chip m-token">token</span><span class="chip m-redacted">redacted</span><span class="chip m-hash">hash only</span><span class="chip m-none">— not available</span><span class="chip m-erased">erased</span>
+      </div>
+    </section>
+
+    <section class="pane ledger" aria-labelledby="led-h">
+      <h2 id="led-h">Immutable ledger</h2>
+      <p class="muted" style="font-size:13px">Each event is SHA-256 hashed together with the previous hash and written to WORM storage. The ledger holds hashes of personal data, never the data itself, so erasure at stage 9 leaves the chain intact.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn" id="verify">Verify chain</button>
+        <button class="btn danger" id="tamper">Simulate a DBA editing event 4</button>
+        <button class="btn" id="restore" hidden>Restore from WORM copy</button>
+      </div>
+      <div class="verdict" id="verdict">Chain not verified yet.</div>
+      <div class="list" id="events"></div>
+      <div class="note" id="led-note">Advance through the stages to append events. Going back in the view never removes an event.</div>
+    </section>
+  </div>
+
+  <footer>Roles and masks follow the AI Governance Layer documents: classification ceilings, DLP redaction before any model call, EU-pinned endpoints, reserve/settle budgeting, and a hash-chained audit store separate from erasable content. Relay numbers expire with the courier's assignment. Pseudonyms are salted hashes kept in a key store the analytics role cannot read.</footer>
+</div>
+
+<script>
+(function(){
+const FIELDS=[
+ {k:'parcel_id',label:'Parcel ID',pii:false,v:'RO-CJ-2026-0048213'},
+ {k:'routing',label:'Routing code',pii:false,v:'DE-80331 · HUB-MUC-2 · R17',partial:'HUB-MUC-2'},
+ {k:'s_name',label:'Sender name',pii:true,v:'Ana Popescu',pseudo:'snd_7f3a91c2',tok:'<PERSON_1>',h:'sha256:9b1c…e4f0'},
+ {k:'s_phone',label:'Sender phone',pii:true,v:'+40 721 334 512',masked:'+40 7•• ••• 512',relay:'+40 31 000 7781 (relay, valid 24 h)',tok:'<PHONE_1>',h:'sha256:4d77…a21b'},
+ {k:'s_email',label:'Sender email',pii:true,v:'ana.popescu@example.ro',masked:'a•••••••@example.ro',tok:'<EMAIL_1>',h:'sha256:c0a2…77d9'},
+ {k:'s_addr',label:'Pickup address',pii:true,v:'Str. Memorandumului 12, ap. 4, 400114 Cluj-Napoca, RO',partial:'400114 Cluj-Napoca',geo:'46.770, 23.589 (±100 m)',tok:'<ADDR_1>',h:'sha256:1e9f…b3c4'},
+ {k:'r_name',label:'Recipient name',pii:true,v:'Jonas Weber',pseudo:'rcp_b84e02d7',tok:'<PERSON_2>',h:'sha256:55ad…0c1e'},
+ {k:'r_phone',label:'Recipient phone',pii:true,v:'+49 171 556 2201',masked:'+49 1•• ••• 2201',relay:'+49 30 000 4410 (relay, valid 24 h)',tok:'<PHONE_2>',h:'sha256:8e0b…f2a7'},
+ {k:'r_addr',label:'Delivery address',pii:true,v:'Sendlinger Str. 8, 80331 München, DE',partial:'80331 München',geo:'48.136, 11.571 (±100 m)',tok:'<ADDR_2>',h:'sha256:a6c3…19de'},
+ {k:'contents',label:'Declared contents',pii:false,v:'Books, 2 × hardcover'},
+ {k:'weight',label:'Weight · size',pii:false,v:'2.4 kg · 32×24×9 cm'},
+ {k:'payment',label:'Payment',pii:true,v:'Visa •••• 4421',token:'tok_9c1e…(PSP vault)',h:'sha256:3f3f…6a60',from:1},
+ {k:'gps',label:'Scan GPS · time',pii:true,v:'46.7701, 23.5894 @ 09:42',geo:'46.770, 23.589 (±100 m)',h:'sha256:d1d1…4b4b',from:4},
+ {k:'pod',label:'Proof of delivery',pii:true,v:'Signature + door photo (encrypted blob)',h:'sha256:7a7a…2c2c',from:8},
+];
+
+const STAGES=[
+ {n:1,t:'Pickup request',sys:'Customer app → Booking service',desc:'Ana books a pickup in the app. The booking service validates the form, tokenises the card with the payment provider, classifies the record CONFIDENTIAL (personal data) and stores it in the EU booking database.',
+  kv:{'Data created':'sender, recipient, parcel, payment token','Lawful basis':'contract (Art. 6(1)(b))','Stored in':'booking-db, eu-central (Frankfurt), encrypted','AI exposure':'booking repo: allowed · payments DB: quarantined'},
+  events:[{type:'pickup_requested',actor:'customer-app',payload:{parcel:'RO-CJ-2026-0048213',sender_h:'9b1c…e4f0',recipient_h:'55ad…0c1e',classification:'CONFIDENTIAL'}}]},
+ {n:2,t:'Validate & price',sys:'Booking service → AI gateway → EU model',desc:'The address normaliser asks a model to fix the two addresses and pick the delivery zone. The gateway strips names, phones and email first, routes to an EU zero-retention endpoint, reserves budget, then settles.',
+  kv:{'Model':'mistral-large (fr-par) · zero retention','Classification':'CONFIDENTIAL → ceiling OK','DLP':'3 redactions, 0 secrets','Budget':'reserve €0.004 → settle €0.003'},
+  ai:{purpose:'Normalise both addresses and return postal codes and zone. Names and contacts are not needed, so they are redacted before the request leaves the gateway.',
+      prompt:'Normalise these addresses to postal format and return JSON {pickup, delivery, zone}.\nPickup: Str. Memorandumului 12, ap. 4, 400114 Cluj-Napoca, RO\nDelivery: Sendlinger Str. 8, 80331 München, DE\nContact on file: [PERSON_1], [PHONE_1], [EMAIL_1] (do not use)',
+      decision:{outcome:'allow (redacted)',reasons:'PII_REDACTED ×3',model:'mistral-large · fr-par · EU_PROVIDER_ZERO_RETENTION',content_log:'off (CONFIDENTIAL)',cost:'€0.003 · team logistics-core 41 %'}},
+  events:[{type:'ai_request',actor:'gateway',payload:{model:'mistral-large@fr-par',decision:'allow',redactions:3,prompt_h:'0ab3…77e1',cost_eur:0.003}},{type:'order_validated',actor:'booking-svc',payload:{parcel:'RO-CJ-2026-0048213',zone:'DE-80331',price_eur:14.9}}]},
+ {n:3,t:'Dispatch',sys:'Route planner → Courier assignment',desc:'The planner optimises the morning pickup round. The model receives rounded coordinates and time windows only. Dispatch assigns courier Mihai and generates 24-hour relay phone numbers so nobody dials a real number.',
+  kv:{'Model':'self-hosted (vLLM, Cluj DC)','Input to model':'12 stops as geo ±100 m + windows','Relay numbers':'generated, expire 24 h after stop','Courier token':'scoped to assigned stops'},
+  ai:{purpose:'Order 12 pickup stops. No names, no addresses: stops are coordinate pairs with time windows.',
+      prompt:'Order these stops to minimise driving time, start 08:30 at depot (46.76, 23.60).\nS07: 46.770, 23.589 window 09:00–11:00 weight 2.4\nS08: 46.781, 23.612 window 09:00–12:00 weight 0.8\n… 10 more',
+      decision:{outcome:'allow',reasons:'—',model:'qwen-coder-32b · self-hosted · EU_SELF_HOSTED',content_log:'on (INTERNAL)',cost:'€0.000 (internal)'}},
+  events:[{type:'ai_request',actor:'gateway',payload:{model:'qwen-coder-32b@cluj',decision:'allow',redactions:0,prompt_h:'7c2e…10aa',cost_eur:0}},{type:'courier_assigned',actor:'dispatch-svc',payload:{parcel:'RO-CJ-2026-0048213',courier:'crr_2291',relay_s:'+40 31 000 7781',expires:'2026-10-20T09:42Z'}}]},
+ {n:4,t:'Pickup',sys:'Courier app → Scan service',desc:'Mihai sees Ana\'s name, the pickup address and a relay number until the scan. He scans the label; the app records GPS and time. After the scan his access to her data is revoked automatically.',
+  kv:{'Courier sees':'sender name, address, relay phone','Courier never sees':'recipient details, email, payment','After scan':'access revoked, relay number expires','Scan proof':'GPS + time + label hash'},
+  events:[{type:'picked_up',actor:'courier-app crr_2291',payload:{parcel:'RO-CJ-2026-0048213',scan_h:'d1d1…4b4b',geo:'46.770,23.589',t:'2026-10-20T09:42Z'}},{type:'access_revoked',actor:'iam',payload:{principal:'crr_2291',scope:'stop S07'}}]},
+ {n:5,t:'Hub intake & sort',sys:'Hub scanners → Sorting system',desc:'At the Cluj hub the parcel is scanned by barcode only. The sorter computes a route from the routing code. The printed label carries the recipient address for last mile, but the sorting software never reads or stores it.',
+  kv:{'Sorter sees':'parcel ID, routing code, weight','Sorter never sees':'any name, phone, email, payment','Label':'routing barcode + address printed from booking-db at print time','AI exposure':'none (sorting rules are deterministic)'},
+  events:[{type:'hub_in',actor:'hub-cluj scanner 3',payload:{parcel:'RO-CJ-2026-0048213',routing:'DE-80331 HUB-MUC-2 R17'}},{type:'sorted',actor:'sort-svc',payload:{parcel:'RO-CJ-2026-0048213',bag:'BAG-CJ-MUC-0412'}}]},
+ {n:6,t:'Linehaul',sys:'Transport management → Hub Munich',desc:'The bag travels Cluj → Munich by road, intra-EU, no customs. Tracking shows bag-level scans. Nothing about the sender or recipient leaves the booking database.',
+  kv:{'Route':'Cluj-Napoca → München, road','Customs data':'none (intra-EU)','Tracking page shows':'parcel ID, stage, ETA','Storage regions':'RO + DE only'},
+  events:[{type:'departed',actor:'tms',payload:{bag:'BAG-CJ-MUC-0412',truck:'TRK-118'}},{type:'arrived',actor:'hub-muc scanner 1',payload:{bag:'BAG-CJ-MUC-0412',parcel:'RO-CJ-2026-0048213'}}]},
+ {n:7,t:'Last mile',sys:'Munich courier app → Notification service',desc:'Courier Lena gets Jonas\'s name, address and a relay number for today. A notification tells Jonas the two-hour window. The message is drafted by a model that sees the window and street name, not the person.',
+  kv:{'Courier sees':'recipient name, address, relay phone','Courier never sees':'sender data, email, payment','Recipient notified via':'SMS with signed tracking link','AI exposure':'drafting the message, redacted'},
+  ai:{purpose:'Draft a German delivery notice. The model gets a placeholder for the name; the notification service fills the real name after the response, inside the EU service.',
+      prompt:'Write a short, polite German SMS: parcel arrives today 14:00–16:00 at [ADDR_2] (street only: Sendlinger Str.). Address recipient as [PERSON_2]. Max 160 chars.',
+      decision:{outcome:'allow (redacted)',reasons:'PII_REDACTED ×2',model:'mistral-small · fr-par · EU_PROVIDER_ZERO_RETENTION',content_log:'off (CONFIDENTIAL)',cost:'€0.001 · team last-mile 63 %'}},
+  events:[{type:'ai_request',actor:'gateway',payload:{model:'mistral-small@fr-par',decision:'allow',redactions:2,prompt_h:'ee41…9c03',cost_eur:0.001}},{type:'out_for_delivery',actor:'courier-app crr_5508',payload:{parcel:'RO-CJ-2026-0048213',relay_r:'+49 30 000 4410',window:'14:00–16:00'}}]},
+ {n:8,t:'Proof of delivery',sys:'Courier app → Evidence store',desc:'Jonas signs on the device. Signature and door photo are encrypted with a per-parcel key and stored in the DE evidence store for 12 months. Both parties get a delivery confirmation with no personal data in it.',
+  kv:{'Evidence':'signature + photo, encrypted, 12 months','Who can open it':'claims handler with a case ID (logged)','Courier access':'revoked after scan','Customer sees':'"Delivered 15:21, signed"'},
+  events:[{type:'delivered',actor:'courier-app crr_5508',payload:{parcel:'RO-CJ-2026-0048213',pod_h:'7a7a…2c2c',t:'2026-10-21T15:21Z'}},{type:'access_revoked',actor:'iam',payload:{principal:'crr_5508',scope:'stop D17'}}]},
+ {n:9,t:'Retention & erasure',sys:'Retention job → Booking DB',desc:'Thirty days after delivery, names, phones, emails and addresses are deleted from the booking database; pseudonymous IDs and postal areas remain for statistics. The ledger is untouched: it only ever held hashes.',
+  kv:{'Deleted':'names, phones, emails, full addresses','Kept':'pseudonyms, postal area, weight, timings','Evidence store':'kept 12 months, then purged','Ledger':'unchanged, chain still verifies'},
+  events:[{type:'pii_minimised',actor:'retention-job',payload:{parcel:'RO-CJ-2026-0048213',fields_erased:6,policy:'ret-30d-v3'}}]},
+];
+
+const LENSES={
+ customer:{name:'Ana (sender app)',desc:'She sees what she entered. After stage 9 only the tracking summary remains.',
+  mode:(f,s)=>{ if(s>=9&&f.pii&&f.k!=='payment')return 'erased'; if(f.k==='payment')return 'token'; if(f.k==='gps')return 'none'; if(f.k==='pod')return s>=8?'full':'none'; return 'full';}},
+ support:{name:'Customer support',desc:'Masked contacts and city only. Full values unmask only inside an open case, and every unmask is logged.',
+  mode:(f,s)=>{ if(s>=9&&f.pii)return 'erased'; if(/phone|email/.test(f.k))return 'masked'; if(/addr/.test(f.k))return 'partial'; if(f.k==='payment')return 'token'; if(f.k==='gps'||f.k==='pod')return 'none'; return 'full';}},
+ dispatcher:{name:'Dispatcher (Cluj)',desc:'Plans pickups. Needs the pickup side until the parcel is scanned, never the recipient.',
+  mode:(f,s)=>{ if(s>=9&&f.pii)return 'erased'; if(f.k==='s_name'||f.k==='s_addr')return s<=4?'full':'none'; if(f.k==='gps')return s>=4?'geo':'none'; if(f.pii)return 'none'; return 'full';}},
+ courier:{name:'Courier app',desc:'Only the stop they are assigned to, only while assigned. Phones are relay numbers that expire.',
+  mode:(f,s)=>{ const pick=(s===3||s===4), del=(s===7||s===8);
+    if(f.k==='s_name'||f.k==='s_addr')return pick?'full':'none'; if(f.k==='s_phone')return pick?'relay':'none';
+    if(f.k==='r_name'||f.k==='r_addr')return del?'full':'none'; if(f.k==='r_phone')return del?'relay':'none';
+    if(f.k==='gps')return (pick||del)?'full':'none'; if(f.k==='pod')return s===8?'full':'none'; if(f.k==='s_email'||f.k==='payment')return 'none';
+    return (pick||del)?'full':'none';}},
+ sorter:{name:'Hub sorting system',desc:'Barcode in, bag out. No personal data at all.',
+  mode:(f)=>(['parcel_id','routing','weight'].includes(f.k)?'full':'none')},
+ ai:{name:'AI model (via gateway)',desc:'What actually reaches a model after DLP. Nothing at stages without an AI call. Endpoints are EU-pinned.',
+  mode:(f,s)=>{ if(s===2){ if(/addr/.test(f.k))return 'full'; if(/name|phone|email/.test(f.k))return 'redacted'; if(f.k==='parcel_id'||f.k==='contents'||f.k==='weight')return 'none'; return 'none';}
+    if(s===3){ if(f.k==='s_addr'||f.k==='gps')return 'geo'; if(f.k==='weight')return 'full'; return 'none';}
+    if(s===7){ if(f.k==='r_name')return 'redacted'; if(f.k==='r_addr')return 'partial'; return 'none';}
+    return 'none';}},
+ analytics:{name:'Analytics warehouse',desc:'Pseudonyms and postal areas. The salt lives in a key store this role cannot read.',
+  mode:(f)=>{ if(/name/.test(f.k))return 'pseudo'; if(/addr/.test(f.k))return 'partial'; if(f.k==='gps')return 'geo'; if(/phone|email|payment|pod/.test(f.k))return 'none'; return 'full';}},
+ auditor:{name:'Auditor (ledger)',desc:'Hashes and event metadata. Enough to prove what happened, never who.',
+  mode:(f)=>(f.pii?'hash':'full')},
+};
+
+const MODE_LABEL={full:'full',masked:'masked',partial:'partial',relay:'relay',geo:'geo ±100 m',pseudo:'pseudonym',token:'token',redacted:'redacted',hash:'hash only',none:'—',erased:'erased'};
+function valueFor(f,mode){
+  switch(mode){case 'full':return f.v;case 'masked':return f.masked;case 'partial':return f.partial;case 'relay':return f.relay;case 'geo':return f.geo;
+  case 'pseudo':return f.pseudo;case 'token':return f.token||f.v;case 'redacted':return f.tok;case 'hash':return f.h;case 'erased':return 'erased 2026-11-20 (ret-30d-v3)';default:return 'not available to this role';}
+}
+
+// ---- state
+let stage=1, maxVisited=1, lens='customer';
+const ledger=[]; // {seq,ts,type,actor,payload,prev,hash,tampered}
+let tampered=false, originalPayload4=null;
+
+// ---- hashing
+const enc=new TextEncoder();
+function canon(o){ if(Array.isArray(o))return '['+o.map(canon).join(',')+']'; if(o&&typeof o==='object')return '{'+Object.keys(o).sort().map(k=>JSON.stringify(k)+':'+canon(o[k])).join(',')+'}'; return JSON.stringify(o); }
+async function sha(s){ const b=await crypto.subtle.digest('SHA-256',enc.encode(s)); return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join(''); }
+async function eventHash(ev){ return sha(canon({seq:ev.seq,ts:ev.ts,type:ev.type,actor:ev.actor,payload:ev.payload})+ev.prev); }
+
+async function appendStageEvents(n){
+  const st=STAGES[n-1]; if(st.appended)return; st.appended=true;
+  for(const e of st.events){
+    const prev=ledger.length?ledger[ledger.length-1].hash:'0'.repeat(64);
+    const ev={seq:ledger.length+1,ts:`2026-10-${String(19+Math.min(n,3)).padStart(2,'0')}T${String(8+n).padStart(2,'0')}:${String((n*7)%60).padStart(2,'0')}:00Z`,type:e.type,actor:e.actor,payload:JSON.parse(JSON.stringify(e.payload)),prev,stage:n};
+    ev.hash=await eventHash(ev); ledger.push(ev);
+  }
+  renderLedger();
+}
+
+async function verify(){
+  const out=[]; let brokenFrom=null;
+  for(let i=0;i<ledger.length;i++){
+    const ev=ledger[i]; const expectPrev=i?ledger[i-1].hash:'0'.repeat(64);
+    const h=await eventHash(ev);
+    const bad=(h!==ev.hash)||(ev.prev!==expectPrev);
+    if(bad&&brokenFrom===null)brokenFrom=i;
+    out.push({bad});
+  }
+  ledger.forEach((ev,i)=>{ev.status= brokenFrom===null?'ok':(i===brokenFrom?'tampered':(i>brokenFrom?'broken':'ok'));});
+  const v=document.getElementById('verdict');
+  if(!ledger.length){v.className='verdict';v.textContent='No events yet.';}
+  else if(brokenFrom===null){v.className='verdict pass';v.textContent=`PASS · ${ledger.length} events · head ${ledger[ledger.length-1].hash.slice(0,16)}… matches WORM anchor`;}
+  else {v.className='verdict fail';v.textContent=`FAIL · event ${brokenFrom+1} does not match its stored hash; every later link is unverifiable. WORM copy and anchor still hold the original.`;}
+  renderLedger();
+}
+
+// ---- render
+function renderRail(){
+  const r=document.getElementById('rail'); r.innerHTML='';
+  STAGES.forEach(s=>{const b=document.createElement('button');b.type='button';
+    b.innerHTML=`<span class="n">${String(s.n).padStart(2,'0')}</span><span class="t">${s.t}</span>${s.ai?'<span class="ai">AI · redacted</span>':'<span class="ai">&nbsp;</span>'}`;
+    if(s.n===stage)b.setAttribute('aria-current','step'); if(s.n<=maxVisited&&s.n!==stage)b.classList.add('visited');
+    b.addEventListener('click',()=>go(s.n)); r.appendChild(b);});
+}
+function renderStage(){
+  const s=STAGES[stage-1];
+  document.getElementById('st-h').textContent=`${String(s.n).padStart(2,'0')} · ${s.t}`;
+  document.getElementById('st-desc').textContent=s.desc;
+  const kv=document.getElementById('st-kv'); kv.innerHTML=`<dt>Systems</dt><dd>${s.sys}</dd>`+Object.entries(s.kv).map(([k,v])=>`<dt>${k}</dt><dd>${v}</dd>`).join('');
+  const ai=document.getElementById('ai-block'), noai=document.getElementById('noai');
+  if(s.ai){ai.hidden=false;noai.hidden=true;
+    document.getElementById('ai-purpose').textContent=s.ai.purpose;
+    document.getElementById('ai-prompt').innerHTML=s.ai.prompt.replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c])).replace(/\[(PERSON|PHONE|EMAIL|ADDR)_\d\]/g,m=>`<span class="tok">${m}</span>`);
+    const d=s.ai.decision; document.getElementById('ai-decision').innerHTML=`<dt>decision</dt><dd class="${d.outcome.startsWith('allow')?'ok':'badc'}">${d.outcome}</dd><dt>reasons</dt><dd>${d.reasons}</dd><dt>endpoint</dt><dd>${d.model}</dd><dt>content log</dt><dd>${d.content_log}</dd><dt>budget</dt><dd>${d.cost}</dd><dt>audit</dt><dd>ai_request event appended, prompt stored as hash</dd>`;
+  } else {ai.hidden=true;noai.hidden=false;}
+  document.getElementById('prev').disabled=stage===1; document.getElementById('next').disabled=stage===9;
+}
+function renderRecord(){
+  const L=LENSES[lens]; document.getElementById('lens-name').textContent=L.name; document.getElementById('lens-desc').textContent=L.desc;
+  const tb=document.querySelector('#rec tbody'); tb.innerHTML='';
+  FIELDS.forEach(f=>{ if(f.from&&stage<f.from)return; const m=L.mode(f,stage);
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td>${f.label}${f.pii?' <span class="pii-tag">PII</span>':''}</td><td class="val m-${m}">${valueFor(f,m)}</td><td><span class="chip m-${m}">${MODE_LABEL[m]}</span></td>`;
+    tb.appendChild(tr);});
+  const mx=document.getElementById('matrix'); const keys=Object.keys(LENSES);
+  const abbr={full:'F',masked:'M',partial:'P',relay:'R',geo:'G',pseudo:'Ps',token:'T',redacted:'Rd',hash:'H',none:'·',erased:'×'};
+  mx.innerHTML='<thead><tr><th>Field</th>'+keys.map(k=>`<th class="${k===lens?'cur':''}" title="${LENSES[k].name}">${LENSES[k].name.split(' ')[0]}</th>`).join('')+'</tr></thead><tbody>'+
+   FIELDS.filter(f=>!(f.from&&stage<f.from)).map(f=>'<tr><td>'+f.label+'</td>'+keys.map(k=>{const m=LENSES[k].mode(f,stage);return `<td class="${k===lens?'cur':''}"><span class="dot m-${m}" title="${MODE_LABEL[m]}">${abbr[m]}</span></td>`;}).join('')+'</tr>').join('')+'</tbody>';
+}
+function renderLedger(){
+  const el=document.getElementById('events'); el.innerHTML='';
+  ledger.forEach(ev=>{const d=document.createElement('div'); d.className='ev '+(ev.status==='tampered'?'tampered':ev.status==='broken'?'broken':'');
+    d.innerHTML=`<div><span class="ty">#${ev.seq} ${ev.type}</span> <span class="muted">· stage ${ev.stage} · ${ev.actor} · ${ev.ts}</span></div><div class="mono" style="font-size:11.5px">${canon(ev.payload)}</div><div class="h">prev ${ev.prev.slice(0,12)}… → hash ${ev.hash.slice(0,20)}…${ev.status==='tampered'?' · STORED HASH NO LONGER MATCHES CONTENT':ev.status==='broken'?' · upstream link broken':''}</div>`;
+    el.appendChild(d);});
+  el.scrollTop=el.scrollHeight;
+}
+function renderAll(){renderRail();renderStage();renderRecord();}
+
+async function go(n){ stage=n; if(n>maxVisited)maxVisited=n; renderAll(); for(let i=1;i<=maxVisited;i++)await appendStageEvents(i); }
+
+document.getElementById('prev').addEventListener('click',()=>go(Math.max(1,stage-1)));
+document.getElementById('next').addEventListener('click',()=>go(Math.min(9,stage+1)));
+const sel=document.getElementById('lens'); Object.entries(LENSES).forEach(([k,v])=>{const o=document.createElement('option');o.value=k;o.textContent=v.name;sel.appendChild(o);});
+sel.addEventListener('change',()=>{lens=sel.value;renderRecord();});
+document.getElementById('verify').addEventListener('click',verify);
+document.getElementById('tamper').addEventListener('click',async()=>{
+  if(ledger.length<4){document.getElementById('verdict').className='verdict';document.getElementById('verdict').textContent='Advance to stage 3 first so event 4 exists.';return;}
+  const ev=ledger[3]; if(!tampered){originalPayload4=JSON.parse(JSON.stringify(ev.payload)); ev.payload.price_eur!==undefined?ev.payload.price_eur=1.0:ev.payload.edited=true; if(ev.payload.zone)ev.payload.zone='DE-10115'; tampered=true;}
+  document.getElementById('restore').hidden=false; document.getElementById('led-note').textContent='Event 4 content was changed in the hot copy. Its stored hash was not (it cannot be: WORM). Run Verify.';
+  renderLedger();
+});
+document.getElementById('restore').addEventListener('click',async()=>{
+  if(tampered){ledger[3].payload=originalPayload4;tampered=false;} document.getElementById('restore').hidden=true;
+  document.getElementById('led-note').textContent='Hot copy restored from the Object-Locked segment. Verify again.'; ledger.forEach(e=>e.status='ok'); await verify();
+});
+
+renderAll(); appendStageEvents(1);
+})();
+</script>

@@ -1,0 +1,38 @@
+# PD-10 — cluster admission for PRODUCTION namespaces.
+# Only images signed by merge-candidate.yml on a merge_group run of the allowed
+# repository are admitted. Preview attestations and PR-run builds are rejected.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: verify-release-signature
+spec:
+  validationFailureAction: Enforce
+  background: false
+  webhookTimeoutSeconds: 30
+  rules:
+    - name: release-signature-from-merge-queue
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaceSelector:
+                matchLabels: { environment: production }
+      verifyImages:
+        - imageReferences: ["ghcr.io/example-org/*"]
+          mutateDigest: true
+          required: true
+          attestors:
+            - entries:
+                - keyless:
+                    issuer: https://token.actions.githubusercontent.com
+                    subjectRegExp: "^https://github.com/example-org/[a-z0-9-]+/.github/workflows/merge-candidate.yml@refs/heads/gh-readonly-queue/main/.*$"
+                    rekor: { url: https://rekor.sigstore.dev }
+                    additionalExtensions:
+                      githubWorkflowTrigger: merge_group
+          attestations:
+            - type: https://slsa.dev/provenance/v1
+              attestors:
+                - entries:
+                    - keyless:
+                        issuer: https://token.actions.githubusercontent.com
+                        subjectRegExp: "^https://github.com/example-org/[a-z0-9-]+/.github/workflows/merge-candidate.yml@refs/heads/gh-readonly-queue/main/.*$"

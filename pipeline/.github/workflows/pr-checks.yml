@@ -1,0 +1,128 @@
+# Gate 1 — PR checks. Runs on the MERGE COMMIT (main + PR), so a green run means
+# the change works against the current main, not only on its own branch.
+#
+# PD-11: PR-triggered jobs execute untrusted code (the PR's Makefile), so the
+# default token is READ-ONLY. Only the ai-label job gets pull-requests: write,
+# and it runs no code from the PR.
+name: pr-checks
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  merge_group: # re-run on the merge queue's final merge result
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-checks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  env-vars:
+    name: env-vars
+    runs-on: ${{ vars.AGL_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # ratchet:actions/checkout@v4
+      - name: Declared-or-nonexistent, no .env, no secret defaults
+        run: bash scripts/check-env-vars.sh
+
+  secrets:
+    name: secrets
+    runs-on: ${{ vars.AGL_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # ratchet:actions/checkout@v4
+        with: {fetch-depth: 0} # full history: a secret committed then removed is still a leak
+      - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # ratchet:gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  lint:
+    name: lint
+    runs-on: ${{ vars.AGL_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # ratchet:actions/checkout@v4
+      - run: make lint
+
+  compile:
+    name: compile
+    runs-on: ${{ vars.AGL_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # ratchet:actions/checkout@v4
+      - run: make build
+
+  test:
+    name: test
+    runs-on: ${{ vars.AGL_RUNNER || 'ubuntu-latest' }}
+    needs: [compile]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # ratchet:actions/checkout@v4
+      - run: make test
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # ratchet:actions/upload-artifact@v4
+        with: {name: test-report, path: reports/, if-no-files-found: ignore}
+
+  dependencies:
+    name: dependencies
+    runs-on: ${{ vars.AGL_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # ratchet:actions/checkout@v4
+      - name: Vulnerability + licence scan
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # ratchet:aquasecurity/trivy-action@v0.35.0
+        with:
+          scan-type: fs
+          scanners: vuln,license,secret
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+      - name: New dependencies must be on the allowlist
+        run: |
+          # Compares lockfile package names against allowlist/packages.txt (private registry mirror).
+          # Hallucinated or typo-squatted package names from AI suggestions fail here.
+          if [ -f allowlist/packages.txt ]; then
+            make deps-list | sort -u > /tmp/deps.txt
+            if comm -23 /tmp/deps.txt <(sort -u allowlist/packages.txt) | grep . ; then
+              echo "::error::dependencies not on allowlist (see above)"; exit 1
+            fi
+          else
+            echo "no allowlist/packages.txt — skipping (make this required before go-live)"
+          fi
+
+  iac-policy:
+    name: iac-policy
+    runs-on: ${{ vars.AGL_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # ratchet:actions/checkout@v4
+      - name: conftest on manifests and terraform
+        uses: instrumenta/conftest-action@2b17b6e48009573bfee75b6f2b51bb1dacb05a2a # ratchet:instrumenta/conftest-action@v0.4.0
+        with:
+          files: deploy/
+          policy: policy/
+
+  ai-label:
+    name: ai-label
+    runs-on: ${{ vars.AGL_RUNNER || 'ubuntu-latest' }}
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      pull-requests: write # only this job; it runs no code from the PR
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # ratchet:actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Detect AI-Assisted trailer and label the PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if git log --format=%B "$BASE..$HEAD" | grep -Eiq '^(AI-Assisted|Co-Authored-By):.*(claude|copilot|codex|cursor|gemini)'; then
+            gh pr edit "$PR" --add-label ai-assisted
+            # Checklist in the PR body must be ticked before merge
+            if gh pr view "$PR" --json body -q .body | grep -q '\- \[ \]'; then
+              echo "::error::AI-assisted checklist has unticked items"; exit 1
+            fi
+          else
+            echo "no AI trailer found"
+          fi
+          # PD-15 (pending): cross-check with gateway telemetry once the AGL query API exists.

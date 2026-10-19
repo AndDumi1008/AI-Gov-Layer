@@ -1,0 +1,141 @@
+# Release — staging auto-promote, production behind a HUMAN-ONLY environment approval.
+#
+# PD-10: the digest is DERIVED from main's commit (which is the merge queue's merge
+# commit) and its signature must come from merge-candidate.yml running on a
+# merge_group trigger. There is no free-form digest input.
+# PD-12: GitOps pushes use short-lived GitHub App tokens minted from ENVIRONMENT
+# secrets (staging / production), so the production credential exists only after
+# a human approved the environment.
+# PD-13: audit events are posted with this workflow's OIDC token.
+name: release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {} # re-run the release for the current main commit; no inputs
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  resolve:
+    name: resolve + verify candidate digest
+    runs-on: ${{ vars.AGL_RUNNER || 'ubuntu-latest' }}
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      digest: ${{ steps.d.outputs.digest }}
+    steps:
+      - uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # ratchet:sigstore/cosign-installer@v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # ratchet:docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: d
+        run: |
+          D=$(docker buildx imagetools inspect "${IMAGE}:${{ github.sha }}" --format '{{json .Manifest.Digest}}' | tr -d '"')
+          # Accept only a signature produced by merge-candidate.yml on a merge_group run of this repository.
+          cosign verify "${IMAGE}@${D}" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --certificate-identity-regexp "^https://github.com/${{ github.repository }}/.github/workflows/merge-candidate.yml@refs/heads/gh-readonly-queue/main/.*$" \
+            --certificate-github-workflow-repository "${{ github.repository }}" \
+            --certificate-github-workflow-trigger merge_group \
+            --certificate-github-workflow-sha "${{ github.sha }}" >/dev/null
+          echo "digest=$D" >> "$GITHUB_OUTPUT"
+
+  staging:
+    name: staging (automatic)
+    runs-on: ${{ vars.AGL_RUNNER || 'ubuntu-latest' }}
+    needs: [resolve]
+    environment: {name: staging, url: 'https://staging.internal.example'}
+    permissions:
+      contents: read
+    steps:
+      - name: Mint short-lived GitOps token (staging environment secrets)
+        id: app
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # ratchet:actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.GITOPS_APP_ID }}
+          private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}
+          owner: example-org
+          repositories: gitops
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # ratchet:actions/checkout@v4
+        with: {repository: example-org/gitops, token: "${{ steps.app.outputs.token }}", path: gitops}
+      - name: Bump digest in staging overlay
+        run: |
+          cd gitops
+          yq -i '.images[0].digest = "${{ needs.resolve.outputs.digest }}"' envs/staging/kustomization.yaml
+          git -c user.name=gitops-bot -c user.email=gitops-bot@example commit -am "staging: ${{ github.repository }} @ ${{ needs.resolve.outputs.digest }}" || true
+          git push
+      - name: Wait for sync + soak (SLO checks)
+        run: make staging-soak DIGEST=${{ needs.resolve.outputs.digest }} MINUTES=30
+
+  release-notes:
+    name: release candidate record
+    runs-on: ${{ vars.AGL_RUNNER || 'ubuntu-latest' }}
+    needs: [resolve, staging]
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # ratchet:actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Draft notes; list AI-assisted PRs separately
+        env: {GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}"}
+        run: |
+          PREV=$(git describe --tags --abbrev=0 2>/dev/null || git rev-list --max-parents=0 HEAD)
+          {
+            echo "## Release candidate ${{ github.sha }}"
+            echo "Image: ${IMAGE}@${{ needs.resolve.outputs.digest }}"
+            echo; echo "### Changes"
+            gh pr list --state merged --search "merged:>=$(git log -1 --format=%cI "$PREV")" --json number,title,labels \
+              -q '.[] | select(.labels|map(.name)|index("ai-assisted")|not) | "- #\(.number) \(.title)"'
+            echo; echo "### AI-assisted changes (reviewed by humans)"
+            gh pr list --state merged --search "merged:>=$(git log -1 --format=%cI "$PREV")" --json number,title,labels \
+              -q '.[] | select(.labels|map(.name)|index("ai-assisted")) | "- #\(.number) \(.title)"'
+          } > RELEASE_CANDIDATE.md
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # ratchet:actions/upload-artifact@v4
+        with: {name: release-candidate, path: RELEASE_CANDIDATE.md}
+
+  production:
+    name: production (human approval required)
+    runs-on: ${{ vars.AGL_RUNNER || 'ubuntu-latest' }}
+    needs: [resolve, staging, release-notes]
+    # The 'production' environment is configured with required reviewers = humans from the
+    # service-owning team. CI identities, bots and GitHub Apps are not eligible reviewers.
+    # No step in this job runs, and no production secret exists, until a human approves.
+    environment: {name: production, url: 'https://app.example'}
+    permissions:
+      contents: read
+      id-token: write # PD-13 audit post
+    steps:
+      - name: Mint short-lived GitOps token (production environment secrets)
+        id: app
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # ratchet:actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.GITOPS_APP_ID }}
+          private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}
+          owner: example-org
+          repositories: gitops
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # ratchet:actions/checkout@v4
+        with: {repository: example-org/gitops, token: "${{ steps.app.outputs.token }}", path: gitops}
+      - name: GitOps commit — the only way production changes
+        run: |
+          cd gitops
+          yq -i '.images[0].digest = "${{ needs.resolve.outputs.digest }}"' envs/production/kustomization.yaml
+          git -c user.name=gitops-bot -c user.email=gitops-bot@example commit -am "production: ${{ github.repository }} @ ${{ needs.resolve.outputs.digest }} approved-run=${{ github.run_id }}"
+          git push
+      - name: Record deploy event in the AGL audit chain (OIDC-authenticated)
+        env: {AGL_AUDIT_URL: "${{ vars.AGL_AUDIT_URL }}"}
+        run: |
+          [ -z "$AGL_AUDIT_URL" ] && { echo "AGL_AUDIT_URL not set; skipping"; exit 0; }
+          IDTOKEN=$(curl -fsS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+                    "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=agl-audit" | jq -r .value)
+          curl -fsS -X POST "$AGL_AUDIT_URL/events" -H "Authorization: Bearer $IDTOKEN" -H 'content-type: application/json' -d @- <<JSON
+          {"type":"deploy_event","environment":"production","repo":"${{ github.repository }}","sha":"${{ github.sha }}","digest":"${{ needs.resolve.outputs.digest }}","run":"${{ github.run_id }}","approver":"${{ github.triggering_actor }}"}
+          JSON

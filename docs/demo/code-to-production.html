@@ -1,0 +1,469 @@
+<title>Code to Production Journey</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a release runbook. Journey rail with detours on top; step detail + AI role + controls in three panes; then a can/cannot ledger and a sandbox simulator. */
+:root{
+  --bg:#f3f5f6; --surface:#ffffff; --fg:#17222c; --muted:#5b6b78; --line:#d6dde3;
+  --accent:#0e6f7a; --accent-ink:#ffffff; --ai:#6b3fa0; --ai-bg:#f1eaf9;
+  --good:#1f7a3f; --good-bg:#e6f4ea; --warn:#b26a00; --warn-bg:#fff4e3; --bad:#b3261e; --bad-bg:#fde9e7;
+  --detour:#8a5a00; --detour-bg:#fff8e8; --prod:#b3261e;
+  --display:"Barlow Condensed","Arial Narrow",sans-serif;
+  --body:"IBM Plex Sans","Helvetica Neue",Arial,sans-serif;
+  --mono:"IBM Plex Mono","SFMono-Regular",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#101619; --surface:#182026; --fg:#e8edf0; --muted:#97a6b2; --line:#2b3740;
+  --accent:#3fb3bf; --accent-ink:#071114; --ai:#c4a6ee; --ai-bg:#2b2140;
+  --good:#5ccf84; --good-bg:#15311f; --warn:#f2b34d; --warn-bg:#3a2a12; --bad:#ff7b72; --bad-bg:#3d1c19;
+  --detour:#f2b34d; --detour-bg:#2e2410; --prod:#ff7b72; color-scheme:dark }}
+:root[data-theme="dark"]{
+  --bg:#101619; --surface:#182026; --fg:#e8edf0; --muted:#97a6b2; --line:#2b3740;
+  --accent:#3fb3bf; --accent-ink:#071114; --ai:#c4a6ee; --ai-bg:#2b2140;
+  --good:#5ccf84; --good-bg:#15311f; --warn:#f2b34d; --warn-bg:#3a2a12; --bad:#ff7b72; --bad-bg:#3d1c19;
+  --detour:#f2b34d; --detour-bg:#2e2410; --prod:#ff7b72; color-scheme:dark }
+
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--body);line-height:1.45;
+  padding-block:20px 48px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.wrap{max-width:1280px;margin:0 auto;display:grid;gap:22px}
+h1,h2,h3{font-family:var(--display);text-wrap:balance;margin:0;letter-spacing:.01em}
+h1{font-size:clamp(30px,4.5vw,44px);line-height:1;text-transform:uppercase}
+h2{font-size:14px;text-transform:uppercase;color:var(--muted);font-weight:600;letter-spacing:.08em}
+h2.big{font-size:24px;color:var(--fg);letter-spacing:.02em}
+h3{font-size:20px}
+p{margin:0}
+.muted{color:var(--muted)}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+a{color:var(--accent)}
+header{display:flex;flex-wrap:wrap;gap:12px 24px;align-items:flex-end;justify-content:space-between;border-bottom:2px solid var(--fg);padding-bottom:12px}
+header .lead{max-width:66ch;color:var(--muted)}
+.badges{display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-family:var(--mono);font-size:12px;padding:4px 8px;border:1px solid var(--line);border-radius:3px;background:var(--surface)}
+
+/* journey rail */
+.rail-wrap{overflow-x:auto;padding-bottom:4px}
+.rail{display:grid;grid-template-columns:repeat(12,minmax(118px,1fr));gap:4px;min-width:1100px}
+.step{display:grid;gap:6px;align-content:start}
+.step>button{all:unset;cursor:pointer;display:grid;gap:4px;padding:10px 8px;border-top:4px solid var(--line);min-width:0}
+.step>button .n{font-family:var(--mono);font-size:11px;color:var(--muted)}
+.step>button .t{font-family:var(--display);font-size:17px;line-height:1.05;text-transform:uppercase}
+.step>button .who{font-size:11px;color:var(--muted);font-family:var(--mono)}
+.step>button[aria-current="step"]{border-top-color:var(--accent)}
+.step>button.prod{border-top-color:var(--prod)}
+.step>button.human .who{color:var(--good)}
+.step>button:focus-visible,.detour:focus-visible,.btn:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.detour{all:unset;cursor:pointer;font-family:var(--mono);font-size:11px;color:var(--detour);background:var(--detour-bg);border:1px dashed var(--detour);border-radius:3px;padding:3px 6px;margin-left:8px;display:block;width:fit-content;max-width:100%}
+.detour::before{content:"↳ "}
+.detour[aria-current="step"]{background:var(--detour);color:var(--surface)}
+
+.panes{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) minmax(0,1fr);gap:18px}
+@media (max-width:1000px){.panes{grid-template-columns:1fr 1fr}.panes>.pane:first-child{grid-column:1/-1}}
+@media (max-width:640px){.panes{grid-template-columns:1fr}}
+.pane{background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:16px;display:grid;gap:10px;align-content:start;min-width:0}
+.pane.detour-pane{border-color:var(--detour);background:var(--detour-bg)}
+.pane.ai-pane{border-left:4px solid var(--ai)}
+ul.plain{margin:0;padding-left:18px;font-size:14px;display:grid;gap:5px}
+ul.plain li::marker{color:var(--muted)}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:14px}
+.kv dt{color:var(--muted)}.kv dd{margin:0;min-width:0}
+.can{color:var(--good)}.cannot{color:var(--bad)}
+.ev{font-family:var(--mono);font-size:12px;background:var(--bg);border:1px solid var(--line);padding:6px 8px;border-radius:3px;word-break:break-word}
+.tag{display:inline-block;font-family:var(--mono);font-size:11px;padding:2px 6px;border-radius:3px;border:1px solid var(--line);white-space:nowrap}
+.tag.ai{background:var(--ai-bg);color:var(--ai);border-color:var(--ai)}
+.tag.human{background:var(--good-bg);color:var(--good);border-color:var(--good)}
+.tag.auto{background:var(--bg)}
+
+/* can/cannot table */
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{text-align:left;padding:8px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-family:var(--mono);font-weight:500;font-size:11px;color:var(--muted);letter-spacing:.06em;text-transform:uppercase}
+.tscroll{overflow-x:auto}
+td.c{font-weight:600}
+td.c.can{color:var(--good)}td.c.cannot{color:var(--bad)}
+
+/* simulator */
+.sim{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.2fr);gap:18px}
+@media (max-width:860px){.sim{grid-template-columns:1fr}}
+.cmdrow{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+select,input[type=text]{font:13px var(--mono);padding:8px 10px;border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:3px;min-width:0}
+input[type=text]{flex:1 1 260px}
+.btn{font:500 14px var(--body);padding:8px 14px;border:1px solid var(--fg);background:var(--surface);color:var(--fg);border-radius:3px;cursor:pointer}
+.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.layers{display:grid;gap:6px}
+.layer{display:grid;grid-template-columns:28px 1fr;gap:10px;align-items:start;padding:8px 10px;border:1px solid var(--line);border-radius:3px;font-size:13px}
+.layer .st{font-family:var(--mono);font-size:12px;font-weight:600;text-align:center;padding:2px 0;border-radius:3px}
+.layer.pass .st{background:var(--good-bg);color:var(--good)}
+.layer.stop .st{background:var(--bad-bg);color:var(--bad)}
+.layer.na .st{color:var(--muted)}
+.layer.stop{border-color:var(--bad);background:var(--bad-bg)}
+.layer .nm{font-family:var(--mono);font-size:11px;color:var(--muted)}
+.verdict{font-family:var(--mono);font-size:13px;padding:8px 10px;border-radius:3px;border:1px solid var(--line)}
+.verdict.allowed{background:var(--good-bg);color:var(--good);border-color:var(--good)}
+.verdict.blocked{background:var(--bad-bg);color:var(--bad);border-color:var(--bad)}
+.verdict.human{background:var(--warn-bg);color:var(--warn);border-color:var(--warn)}
+.sample{all:unset;cursor:pointer;font-family:var(--mono);font-size:12px;padding:4px 8px;border:1px solid var(--line);border-radius:3px;background:var(--surface)}
+.sample:hover{border-color:var(--fg)}
+.samples{display:flex;flex-wrap:wrap;gap:6px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px}
+.benefit{border-top:3px solid var(--ai);padding-top:8px;display:grid;gap:4px;font-size:14px}
+.benefit b{font-family:var(--display);font-size:18px;text-transform:uppercase;letter-spacing:.02em;font-weight:700}
+footer{font-size:13px;color:var(--muted);max-width:90ch}
+.legend{display:flex;flex-wrap:wrap;gap:10px;font-size:12px;align-items:center}
+@media (prefers-reduced-motion:no-preference){.layer{animation:in .2s ease-out both}.layer:nth-child(2){animation-delay:.05s}.layer:nth-child(3){animation-delay:.1s}.layer:nth-child(4){animation-delay:.15s}.layer:nth-child(5){animation-delay:.2s}.layer:nth-child(6){animation-delay:.25s}.layer:nth-child(7){animation-delay:.3s}}
+@keyframes in{from{opacity:.2;transform:translateX(-4px)}to{opacity:1;transform:none}}
+</style>
+
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Code to Production Journey</h1>
+      <p class="lead">How a change is written with AI help, tested against the current version, reviewed and released, with the detours that real work takes: failed checks, requested changes, rollbacks and incidents. Every step says what the AI does, what it cannot do, and what stops it.</p>
+    </div>
+    <div class="badges">
+      <span class="badge">Companion: <a href="https://claude.ai/artifact/23GD8uvnVNNwdzkkcqc83L">Parcel Data Journey</a></span>
+      <span class="badge">AGL docs 02 · 08 · 09</span>
+    </div>
+  </header>
+
+  <div class="legend"><span class="tag human">human decides</span><span class="tag auto">automatic</span><span class="tag ai">AI assists</span><span class="detour" tabindex="-1" style="margin:0">detour</span></div>
+  <div class="rail-wrap"><nav class="rail" id="rail" aria-label="Steps"></nav></div>
+
+  <div class="panes">
+    <section class="pane" id="p-step" aria-live="polite">
+      <h2>What happens</h2>
+      <h3 id="st-title"></h3>
+      <p id="st-desc" style="font-size:14px"></p>
+      <dl class="kv" id="st-kv"></dl>
+      <h2 style="margin-top:4px">Events written to the audit chain</h2>
+      <div id="st-events" style="display:grid;gap:4px"></div>
+    </section>
+    <section class="pane ai-pane">
+      <h2>AI at this step</h2>
+      <p class="muted" style="font-size:12px">Model calls go through the gateway: EU endpoint, DLP, budget, audit.</p>
+      <h3 class="can" style="font-size:15px">Does</h3>
+      <ul class="plain" id="ai-does"></ul>
+      <h3 class="cannot" style="font-size:15px">Cannot</h3>
+      <ul class="plain" id="ai-cannot"></ul>
+    </section>
+    <section class="pane">
+      <h2>How the release is secured here</h2>
+      <ul class="plain" id="st-controls"></ul>
+      <h2 style="margin-top:4px">Enforced by</h2>
+      <p id="st-enforced" style="font-size:13px"></p>
+    </section>
+  </div>
+
+  <section class="pane" style="gap:14px">
+    <h2 class="big">What the AI can and cannot do, and how we know</h2>
+    <div class="tscroll"><table id="cc">
+      <thead><tr><th>Capability</th><th>AI</th><th>Enforced where</th><th>Who can change it</th><th>How we prove it holds</th></tr></thead><tbody></tbody>
+    </table></div>
+  </section>
+
+  <section class="pane" style="gap:14px">
+    <h2 class="big">Try to break it</h2>
+    <p class="muted" style="font-size:14px;max-width:80ch">Pick something an agent might try, or type a command. The simulator walks it through the seven layers in the order they are met and shows what gets logged. Allowed things stay allowed: the point is not to block work, it is to make the forbidden things impossible rather than discouraged.</p>
+    <div class="sim">
+      <div style="display:grid;gap:10px;align-content:start">
+        <div class="cmdrow">
+          <input type="text" id="cmd" placeholder="e.g. kubectl delete pod -n prod api-1" aria-label="Command the agent attempts">
+          <button class="btn primary" id="run">Attempt</button>
+        </div>
+        <div class="samples" id="samples"></div>
+        <p class="muted" style="font-size:12px">Context: agent session in a sandbox, delegated identity <span class="mono">agent:claude-code on behalf of dana</span>, repository <span class="mono">booking-svc</span> (INTERNAL), team budget 63 % used.</p>
+      </div>
+      <div style="display:grid;gap:10px;align-content:start">
+        <div class="verdict" id="sim-verdict">No attempt yet.</div>
+        <div class="layers" id="layers"></div>
+        <div class="ev" id="sim-event" hidden></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="pane" style="gap:14px">
+    <h2 class="big">What the AI infrastructure gives the team</h2>
+    <div class="grid2" id="benefits"></div>
+  </section>
+
+  <footer>Everything above maps to the AI Governance Layer documents: the delivery pipeline (08), the technical requirements (02 §5–7) and the problem register (09, entries PD-07 and PD-10 to PD-17). Human approval points are the pull request review and the production environment. The AI never holds a production credential, never has a network route to production, and never executes anything without a deterministic executor deciding first.</footer>
+</div>
+
+<script>
+(function(){
+const STEPS=[
+ {n:1,t:'Plan & ticket',who:'human',desc:'A ticket is opened with the change, the affected repository and its classification. If the repository is quarantined (gate G1–G6 not satisfied) no AI sandbox or gateway call will be accepted for it.',
+  kv:{'Inputs':'ticket, repo classification, quarantine gate state','Owner':'engineer + product'},
+  does:['Summarise the ticket history and related incidents (redacted)','Draft acceptance criteria for the engineer to edit'],
+  cannot:['Open a sandbox for a quarantined repository','Read production data to "understand the bug"'],
+  controls:['Repository `ai_exposure` gate evaluated on every request','RESTRICTED repositories never get a sandbox'],
+  enforced:'Control-plane trigger on `repository.ai_exposure`; policy input on every gateway call; sandbox orchestrator refuses.',
+  events:['repo_gate_check {repo:"booking-svc", exposure:"allowed"}'],
+  detours:['quarantine']},
+ {n:2,t:'Write code locally',who:'human',desc:'The developer works on their laptop with Claude Code. Model calls go to the gateway, which checks identity, classification ceiling, DLP, budget and residency, and records the call. The laptop holds no production credentials and only the masked dataset.',
+  kv:{'Tools':'IDE + Claude Code → AGL gateway','Model':'EU endpoint from the registry','Data':'masked dataset only'},
+  does:['Propose code and tests','Explain unfamiliar code','Run the local test suite and fix failures','Draft the commit message with the AI-Assisted trailer'],
+  cannot:['Reach a model endpoint outside the registry (egress blocked)','Send a secret or RESTRICTED data (DLP blocks)','Spend past the team envelope','Touch production: no credentials exist on the machine'],
+  controls:['Managed settings pin the base URL to the gateway','Privileged access system holds production access; nothing standing on laptops','Pre-commit secret and env-var checks (convenience, not the control)'],
+  enforced:'MDM-managed CLI settings; egress proxy allowlist; PAM with just-in-time sessions; gateway policy.',
+  events:['ai_request {model:"code-default", decision:"allow", redactions:0, cost_eur:0.004}','ai_request {decision:"block", reasons:["SECRET_DETECTED"]} (when it happens)'],
+  detours:['dlp_block','budget']},
+ {n:3,t:'Commit & push',who:'human',desc:'Only the human commits. Commits are signed with the developer’s key and carry the AI-Assisted trailer when the assistant contributed. Push goes to a feature branch; main refuses direct pushes.',
+  kv:{'Signature':'SSH/GPG/gitsign, developer identity','Trailer':'AI-Assisted: claude-code'},
+  does:['Suggest the commit message'],
+  cannot:['Commit under its own identity (it has none on the laptop)','Push to main (ruleset: no direct push)'],
+  controls:['Required signatures on main','Branch ruleset blocks direct push and force push'],
+  enforced:'Git hosting ruleset `main — governed merge path`; signature verification server-side.',
+  events:['push {branch:"feature/eta-window", commits:3, signed:true}']},
+ {n:4,t:'Pull request',who:'human',desc:'The PR is opened with the template. The ai-label check detects the trailer, applies the label and requires the AI-assisted checklist to be ticked. CODEOWNERS pulls in a second reviewer for sensitive paths.',
+  kv:{'Template':'continuity + AI-assisted checklist','Label':'ai-assisted (automatic)'},
+  does:['Draft the PR description from the diff','Answer reviewer questions about the change'],
+  cannot:['Tick the checklist (a human attests)','Approve the PR (bot approvals are not counted)'],
+  controls:['`ai-label` required check','CODEOWNERS review for auth, payments, infra, policy'],
+  enforced:'Ruleset: require code owner review, 1+ human approval, dismiss stale reviews.',
+  events:['pr_opened {pr:482, label:"ai-assisted", codeowners:["security"]}']},
+ {n:5,t:'Gate 1 · checks',who:'auto',desc:'Required checks run on the merge commit of main plus the PR: env-vars, secrets, lint, compile, test, dependencies, IaC policy. If main moves, the checks are stale and must rerun. Jobs run with a read-only token because they execute the PR’s own build scripts.',
+  kv:{'Runs on':'refs/pull/N/merge (main + PR)','Token':'read-only','Dependencies':'allowlist of the private registry'},
+  does:['Explain a failing check to the developer','Propose a fix for a lint or test failure (as a new commit by the human)'],
+  cannot:['Re-run or skip a required check','Add a dependency that is not on the allowlist','Reach any credential from inside a PR job'],
+  controls:['Strict status checks (branch must be up to date)','Secrets scan on full history','Env-var rules: declared, no .env, no secret defaults'],
+  enforced:'Ruleset required checks; workflow `permissions: contents: read`; ephemeral runners.',
+  events:['ci_checks {pr:482, sha:"c0ffee…", results:{"env-vars":"pass","secrets":"pass","test":"fail"}}'],
+  detours:['ci_failure']},
+ {n:6,t:'Gate 2 · merge candidate',who:'auto',desc:'Build once from the merge commit, generate SBOM, apply migrations on a masked copy of the current schema with an expand/contract check, deploy a preview of main plus the PR, run smoke, end-to-end and the previous release’s contract tests. PR builds get a preview attestation only; the release signature is produced later in the merge queue.',
+  kv:{'Artifact':'one image digest; never rebuilt','Preview':'pr-482.preview.internal, masked data','Compat':'N-1 contract tests'},
+  does:['Summarise test results and preview diffs for the reviewer','Suggest a backward-compatible migration shape'],
+  cannot:['Sign a release image (only merge-queue runs can)','Deploy the preview with real data (catalog refuses prod-derived)'],
+  controls:['Preview job bound to the `preview` environment with namespace-scoped credentials','Preview attestation type is rejected by release and admission'],
+  enforced:'Workflow conditions on `merge_group`; environment-scoped OIDC trust policy; Kyverno admission.',
+  events:['merge_candidate {pr:482, digest:"sha256:9e2…", migrations:"pass", preview:"pass"}'],
+  detours:['migration_block']},
+ {n:7,t:'Human review',who:'human',desc:'A reviewer who is not the author reads the diff, the preview and the checklist. For sensitive paths a code owner approves as well. This is the first human-in-the-loop point. AI review bots may comment; their approval does not count.',
+  kv:{'Required':'≥ 1 human ≠ author; CODEOWNERS where applicable','Advisory':'AI review comments through the gateway'},
+  does:['Leave advisory review comments (read-only token, repo classification applied)','Highlight risky patterns, missing tests, dependency changes'],
+  cannot:['Count as an approval','Dismiss a human review','Merge'],
+  controls:['Bot approvals excluded by ruleset','Stale approvals dismissed on new commits','Review threads must be resolved'],
+  enforced:'Ruleset pull_request parameters; repository setting “Actions may approve PRs” off.',
+  events:['review {pr:482, reviewer:"teo", decision:"approve"}'],
+  detours:['changes_requested']},
+ {n:8,t:'Merge queue → main',who:'auto',desc:'The queue builds the final merge result (other PRs may have landed), reruns Gate 1 and Gate 2, and only this run produces the release signature, SBOM attestation and provenance. On success the queue fast-forwards main to that commit.',
+  kv:{'Trigger':'merge_group','Signature':'cosign keyless, bound to this workflow + trigger'},
+  does:['Nothing. The queue is deterministic'],
+  cannot:['Enqueue, reorder or bypass the queue'],
+  controls:['Release signature only on merge_group runs','Merge event with reviewers, checks and digest written to the audit chain'],
+  enforced:'Workflow `if: github.event_name == merge_group`; ruleset merge_queue rule.',
+  events:['merge_event {pr:482, merge_commit:"a1b2…", digest:"sha256:9e2…", reviewers:["teo"], ai_assisted:true}']},
+ {n:9,t:'Staging soak',who:'auto',desc:'The release workflow verifies the signature’s origin (repository, workflow, merge_group trigger, SHA), then a short-lived GitHub App token bumps the digest in the staging overlay. The GitOps controller rolls it out; SLO checks run for the soak window.',
+  kv:{'Verify':'cosign verify with workflow ref + trigger + SHA','Credential':'App token from staging environment secrets','Soak':'30 min SLO window'},
+  does:['Summarise soak metrics and error signatures (redacted) for the release approver'],
+  cannot:['Skip or shorten the soak','Push to the GitOps repository (no token outside the job)'],
+  controls:['Digest derived from main’s commit; no free-form input','Staging credentials exist only inside the staging environment'],
+  enforced:'cosign verify flags; GitHub environments; GitOps repo protection.',
+  events:['deploy_event {env:"staging", digest:"sha256:9e2…", soak:"pass"}'],
+  detours:['soak_fail']},
+ {n:10,t:'Release approval',who:'human',desc:'The production environment requires a human reviewer from the service-owning team. They see the release candidate record: digest, provenance, SBOM, test evidence, staging soak, and the list of AI-assisted PRs. Nothing in the production job runs, and no production secret exists, until they approve. Second human-in-the-loop point.',
+  kv:{'Approver':'service owner (human only)','Sees':'release candidate record + AI-assisted share'},
+  does:['Draft release notes, listing AI-assisted changes separately'],
+  cannot:['Approve the environment','Trigger the production job','Read the production App credentials'],
+  controls:['Required reviewers = humans; CI identities and apps ineligible','Production App credentials are environment secrets'],
+  enforced:'GitHub environment protection; environment-scoped secrets.',
+  events:['release_approval {sha:"a1b2…", approver:"sven", run:81723}']},
+ {n:11,t:'Production rollout',who:'auto',desc:'The production job mints a short-lived App token, commits the digest bump to the production GitOps overlay, and the GitOps controller, the only writer to production clusters, reconciles. Admission verifies the signature and provenance come from the merge queue. Rollout is progressive with automatic rollback on SLO breach.',
+  kv:{'Writer to prod':'GitOps controller only','Admission':'Kyverno: merge-queue signature + SLSA provenance','Rollout':'canary → full'},
+  does:['Nothing at this step. There is no AI identity anywhere near production'],
+  cannot:['Reach production: no credential, no route, org policy denies agent principals','Change the GitOps overlay'],
+  controls:['Org-level deny for `agent=true` principals and AGL roles in production scopes','Network: no route from sandboxes or AGL to production','Admission rejects preview-attested or unsigned images'],
+  enforced:'SCP / Azure Policy / Org Policy; VPC design; Kyverno ClusterPolicy; quarterly isolation test.',
+  events:['deploy_event {env:"production", digest:"sha256:9e2…", approver:"sven", admission:"admitted"}'],
+  detours:['rollback','hotfix']},
+ {n:12,t:'Observe & learn',who:'auto',desc:'Telemetry is pseudonymous by design, so an AI assistant can help on-call read it. Incidents open a ticket, which starts the journey again at step 1. The audit chain lets anyone walk from the incident back to the deploy, the merge, the PR and the sandbox session that produced the change.',
+  kv:{'Telemetry':'pseudonymous IDs, redaction in the log pipeline','Trace':'incident → deploy → merge → PR → session'},
+  does:['Correlate alerts and draft an incident summary from redacted logs','Propose a hypothesis and a reproduction on masked data'],
+  cannot:['Query production databases','Restart, scale or kill anything in production','Open a sandbox for a quarantined repository'],
+  controls:['Read-only, redacting log access','Audit chain hash-verified nightly'],
+  enforced:'Log pipeline processors; chain verification job; PAM for any human production access.',
+  events:['incident_opened {id:"INC-2291", linked_deploy:"sha256:9e2…"}'],
+  detours:['incident']},
+];
+
+const DETOURS={
+ quarantine:{t:'Repository quarantined',from:1,back:1,desc:'The repository’s gate is not satisfied (for example a dataset tagged prod-derived was attached, or the classification manifest is missing). Every AI path closes: gateway requests with this repo context return REPO_QUARANTINED, sandbox creation is refused, CI AI steps are skipped.',
+  who:'Security and the application owner clear the gate items and both sign off; the trigger then allows `ai_exposure = allowed`.',
+  ai:'None until cleared. The developer can still work without AI assistance.',events:['repo_gate_check {exposure:"quarantined", open:["G2 no_prod_data"]}']},
+ dlp_block:{t:'DLP block on a prompt',from:2,back:2,desc:'The developer pastes a log line containing an access key. The gateway blocks the request before it leaves, returns the reason and remediation, and opens a security ticket because the key may be real.',
+  who:'Developer removes the secret and retries; security on-call rotates the key if it was real.',ai:'Never saw the prompt. The event stores the finding type and count, not the value.',events:['ai_request {decision:"block", reasons:["SECRET_DETECTED"], dlp:{AWS_KEY:1}}','ticket_opened {type:"possible_secret_exposure"}']},
+ budget:{t:'Budget exhausted',from:2,back:2,desc:'The team envelope hits 100 %. Requests return BUDGET_EXHAUSTED with a link to the top-up form. The team lead requests a top-up with a justification; an approver who is not the requester decides.',
+  who:'Team lead requests; budget owner approves; both logged.',ai:'Blocked until the envelope is adjusted. Work continues without it.',events:['budget_event {scope:"team", utilisation:1.0, action:"block"}','budget_exception {amount_eur:500, approver:"mira"}']},
+ ci_failure:{t:'CI failure',from:5,back:2,desc:'A required check fails on the merge commit. The PR cannot merge. The developer reads the failure (the assistant can explain it) and pushes a fix, which reruns everything. A check cannot be skipped or marked as passed by anyone, including administrators, because the ruleset has no bypass actors.',
+  who:'Developer fixes and pushes. Nobody can override.',ai:'Explains the failure and proposes a fix; the human commits it.',events:['ci_checks {results:{test:"fail"}}','push {commits:1}','ci_checks {results:{test:"pass"}}']},
+ migration_block:{t:'Migration not backward compatible',from:6,back:2,desc:'The expand/contract check shows the previous version would fail against the new schema. Gate 2 fails before any preview is deployed. The migration is split into an expand step (this release) and a contract step (a later release).',
+  who:'Developer reshapes the migration; data owner reviews via CODEOWNERS.',ai:'Suggests the expand/contract split; cannot run the migration anywhere but the masked CI database.',events:['merge_candidate {migrations:"fail", reason:"column dropped while previous version reads it"}']},
+ changes_requested:{t:'Changes requested',from:7,back:2,desc:'The reviewer requests changes. New commits dismiss the previous approval. The loop repeats through Gates 1 and 2 until approval.',
+  who:'Reviewer and developer.',ai:'Can draft the response to review comments; the human decides and commits.',events:['review {decision:"changes_requested"}']},
+ soak_fail:{t:'Staging soak fails',from:9,back:12,desc:'SLO checks fail during the soak window. The release stops before the approval step; staging is reverted to the previous digest by the same GitOps path. An issue is opened with the soak evidence.',
+  who:'Automatic stop; service owner triages.',ai:'Summarises the soak metrics for the ticket.',events:['deploy_event {env:"staging", soak:"fail"}','deploy_event {env:"staging", type:"rollback"}','incident_opened {severity:"low"}']},
+ rollback:{t:'Rollback',from:11,back:12,desc:'The canary breaches its SLO or an operator decides to roll back. The pre-approved runbook commits the previous digest to the production overlay; the controller reconciles; admission re-verifies the old signature. A rollback is a deploy event with type rollback, approved by the runbook’s pre-authorisation and logged with the operator’s identity.',
+  who:'Automatic on SLO breach, or the on-call human. Never the AI.',ai:'May summarise what changed between the two digests for the post-incident review.',events:['deploy_event {env:"production", type:"rollback", from:"sha256:9e2…", to:"sha256:71c…", trigger:"slo_breach"}']},
+ hotfix:{t:'Hotfix (break-glass)',from:11,back:1,desc:'An urgent fix cannot wait for the full path. The break-glass exception needs two approvers, is time-boxed to 72 hours and still goes through signing, admission and a human environment approval. What it may skip is the staging soak length, not the gates. AI tooling stays excluded from the production side.',
+  who:'Two approvers, neither the requester; post-review within five working days.',ai:'Same as a normal change: helps write and test the fix in the sandbox.',events:['exception_requested {type:"emergency_change"}','exception_approved {approvers:["ines","sven"], ends_at:"+72h"}','deploy_event {env:"production", exception_id:"exc_…"}']},
+ incident:{t:'Incident → issue ticket',from:12,back:1,desc:'An alert fires. On-call reads pseudonymous telemetry, optionally with the assistant’s help on redacted data, opens an incident and a ticket. The audit chain links the incident to the deploy and to every upstream event. The fix starts the journey again at step 1.',
+  who:'On-call human. Production actions go through the privileged access system.',ai:'Correlates, summarises, proposes a reproduction on masked data. Cannot act on production.',events:['incident_opened {id:"INC-2291", linked_deploy:"sha256:9e2…"}','ticket_opened {repo:"booking-svc"}']},
+};
+
+const CC=[
+ ['Suggest code, tests, commit messages, PR text, release notes','can','Gateway (model calls), developer’s editor','—','Audit events per call'],
+ ['Read the repository it was given and the masked dataset','can','Sandbox mounts; dataset catalog `mountable`','Platform via reviewed PR','Catalog has no mountable prod-derived rows; sandbox probe'],
+ ['Run the test suite, build, lint','can','Tool allowlist; workspace-scoped shell','Security via policy repo','Policy unit tests; replay of agent_action events'],
+ ['Push to a feature branch, open a draft PR','can','Delegated token scopes `repo:push:feature/*`','Orchestrator code','Token introspection per session'],
+ ['Comment on a PR (advisory)','can','Read-only bot token','Platform','Ruleset ignores bot approvals'],
+ ['Commit under its own identity','cannot','No agent identity exists in Git; humans sign','—','Required signatures on main'],
+ ['Approve or merge a PR','cannot','Ruleset: human ≠ author; bot approvals not counted; merge queue only','Platform + security, dual review','Test: bot approval leaves PR blocked'],
+ ['Skip, rerun or mark a required check','cannot','Ruleset with no bypass actors','Org admins (logged)','Ruleset export diffed in CI'],
+ ['Sign a release image','cannot','Signature only on merge_group runs; verified by ref, trigger, SHA','Platform via workflow PR','cosign verify in release; Kyverno in cluster'],
+ ['Approve a production deployment','cannot','Environment required reviewers = humans','Repo admins (logged)','Test: CI identity cannot approve'],
+ ['Send data to a non-EU or unregistered model','cannot','Registry region check; egress allowlist','Security + DPO dual approval','Schema rejects non-EU rows; egress probe'],
+ ['Send secrets or RESTRICTED data to any model','cannot','DLP block; classification ceiling','Security via policy repo','DLP decision logs; false-positive queue'],
+ ['Spend beyond the envelope','cannot','Budget ledger reserve/settle; hard cap','Budget owner (logged)','Monthly reconciliation vs invoices'],
+ ['Reach production: network, credentials, IAM','cannot','No route; no creds in sandbox; org-level deny on agent principals','Cloud governance, two approvers','Quarterly isolation test + IAM simulation'],
+ ['Kill, restart or delete anything outside its sandbox','cannot','Own PID namespace; read-only root FS; dropped capabilities; command policy','Platform via sandbox image PR','Admission policy on pod spec; probe in isolation test'],
+ ['Install a package not on the private mirror','cannot','Egress allowlist; dependency allowlist check in CI','Platform','`dependencies` required check'],
+ ['Keep running without limits','cannot','Step cap and budget cap per session; suspend switch','Security admin','Alerts on suspension; session metrics'],
+];
+
+const LAYERS=['Tool policy (allowlist, deny patterns)','Sandbox OS (PID namespace, read-only FS, no capabilities)','Credentials (none for prod; token scoped)','Network egress (allowlist: gateway, mirror, SCM)','Org policy / IAM (deny agent principals in prod)','Pipeline (ruleset, checks, environments, admission)','Policy gate + audit (OPA decision, event written)'];
+
+const SAMPLES=[
+ {c:'kill -9 1',r:'kill'},
+ {c:'rm -rf /',r:'rmroot'},
+ {c:'rm -rf ./build && make build',r:'rmws'},
+ {c:'curl https://api.openai.com/v1/chat/completions',r:'egress'},
+ {c:'kubectl delete pod -n prod api-1',r:'kubeprod'},
+ {c:'aws s3 cp s3://prod-backups/dump.sql .',r:'awsprod'},
+ {c:'psql "$PROD_DATABASE_URL" -c "select * from customers"',r:'psqlprod'},
+ {c:'git push origin main',r:'pushmain'},
+ {c:'gh pr merge 482 --admin',r:'merge'},
+ {c:'npm install leftpad-secure-utils',r:'npm'},
+ {c:'cat .env && echo "paste into prompt"',r:'env'},
+ {c:'make test',r:'ok'},
+ {c:'git push origin feature/eta-window',r:'pushfeat'},
+];
+
+const RULES={
+ kill:{v:'blocked',at:0,why:'`kill` is on the deny list. Even if it were not, the sandbox has its own PID namespace: PID 1 here is the sandbox init, and nothing outside is visible.',layers:['stop','stop','na','na','na','na','pass'],ev:'agent_action_denied {tool:"shell", cmd_h:"3fa1…", reason:"DENIED_COMMAND:kill", layer:"tool_policy"}'},
+ rmroot:{v:'blocked',at:0,why:'`rm -rf` outside the workspace path is denied by the command policy; the root filesystem is read-only anyway, and the container is ephemeral.',layers:['stop','stop','na','na','na','na','pass'],ev:'agent_action_denied {tool:"shell", reason:"PATH_OUTSIDE_WORKSPACE", layer:"tool_policy"}'},
+ rmws:{v:'allowed',at:-1,why:'Deleting a build directory inside the workspace and rebuilding is ordinary work. Allowed, executed, logged.',layers:['pass','pass','pass','pass','na','na','pass'],ev:'agent_action_executed {tool:"shell", cmd_h:"8b02…", exit:0}'},
+ egress:{v:'blocked',at:3,why:'The command itself is fine, but the destination is not on the egress allowlist. The connection is refused at the network layer; the registry would also have no such endpoint. The attempt is logged as egress_blocked and counted.',layers:['pass','pass','pass','stop','na','na','pass'],ev:'egress_blocked {host:"api.openai.com", identity:"agent:claude-code/dana", sandbox:"sbx-1f9"}'},
+ kubeprod:{v:'blocked',at:2,why:'There is no kubeconfig and no cloud credential in the sandbox, so kubectl has nothing to authenticate with. If one were smuggled in, the org policy denies agent principals in production and there is no network route to the cluster API.',layers:['pass','pass','stop','stop','stop','na','pass'],ev:'agent_action_denied {tool:"shell", cmd:"kubectl delete …", reason:"NO_CREDENTIAL", probes:{route_to_prod:"unreachable"}}'},
+ awsprod:{v:'blocked',at:2,why:'No AWS credentials exist in the sandbox and the metadata endpoint is unreachable. A service control policy denies any principal tagged agent=true in the production account regardless.',layers:['pass','pass','stop','stop','stop','na','pass'],ev:'agent_action_denied {tool:"shell", reason:"NO_CREDENTIAL", scp:"deny agent=true in prod OU"}'},
+ psqlprod:{v:'blocked',at:2,why:'PROD_DATABASE_URL is not defined anywhere the agent can read; the env-var check keeps production identifiers out of code; the production database has no route from non-prod networks.',layers:['pass','pass','stop','stop','na','pass','pass'],ev:'agent_action_denied {tool:"shell", reason:"UNDEFINED_PROD_VARIABLE", layer:"credentials"}'},
+ pushmain:{v:'blocked',at:2,why:'The delegated token is scoped to push feature/* only, and the ruleset on main refuses direct pushes for everyone.',layers:['pass','pass','stop','pass','na','stop','pass'],ev:'agent_action_denied {tool:"git", reason:"TOKEN_SCOPE:feature/*", ruleset:"main — governed merge path"}'},
+ merge:{v:'blocked',at:2,why:'The token has no merge permission and the ruleset has no bypass actors, so --admin does nothing even for administrators. Only the merge queue merges, after a human approval.',layers:['pass','pass','stop','pass','na','stop','pass'],ev:'agent_action_denied {tool:"gh", reason:"NO_MERGE_PERMISSION"}'},
+ npm:{v:'blocked',at:3,why:'The package mirror is the only reachable registry and that name is not on it. Hallucinated or typo-squatted packages fail here, and again at the dependencies check in CI if the lockfile changes.',layers:['pass','pass','pass','stop','na','stop','pass'],ev:'egress_blocked {host:"registry.npmjs.org"} · dependency_denied {package:"leftpad-secure-utils", reason:"NOT_ON_ALLOWLIST"}'},
+ env:{v:'blocked',at:2,why:'No .env exists in the sandbox (it is never committed and never mounted). If a file with secrets were present and pasted into a prompt, the gateway DLP would block the prompt before it left.',layers:['pass','pass','stop','na','na','na','pass'],ev:'agent_action_executed {tool:"shell", cmd:"cat .env", exit:1, stderr:"No such file"} · ai_request {decision:"block", reasons:["SECRET_DETECTED"]} (if pasted)'},
+ ok:{v:'allowed',at:-1,why:'Running tests is what the sandbox is for.',layers:['pass','pass','pass','pass','na','na','pass'],ev:'agent_action_executed {tool:"shell", cmd:"make test", exit:0, duration_s:41}'},
+ pushfeat:{v:'allowed',at:-1,why:'Pushing to a feature branch is inside the token scope. The PR that follows goes through Gates 1 and 2 and a human review; nothing the agent pushed can reach main on its own.',layers:['pass','pass','pass','pass','na','pass','pass'],ev:'agent_action_executed {tool:"git", push:"feature/eta-window", commits:1}'},
+ human:{v:'human',at:6,why:'Not on the deny list and not clearly safe: the policy gate returns require_human. The agent waits; the developer approves or rejects in their own UI, and the decision is logged with their identity.',layers:['pass','pass','pass','pass','na','na','stop'],ev:'agent_action_requested {tool:"shell", cmd_h:"…", decision:"require_human"} → agent_action_executed {approved_by:"dana"} or agent_action_denied'},
+ unknown:{v:'blocked',at:0,why:'Unknown binary. The tool policy is default-deny: anything not on the allowlist is refused and logged. A human can add it through a reviewed policy change.',layers:['stop','na','na','na','na','na','pass'],ev:'agent_action_denied {tool:"shell", reason:"BINARY_NOT_ALLOWLISTED"}'},
+};
+function classify(cmd){
+  const c=cmd.trim();
+  if(!c)return null;
+  const s=SAMPLES.find(x=>x.c===c); if(s)return s.r;
+  if(/\bkill(all)?\b|pkill|systemctl (stop|restart)|shutdown|reboot/.test(c))return 'kill';
+  if(/rm\s+-rf?\s+(\/|~|\$HOME)(\s|$)/.test(c)||/mkfs|dd\s+if=/.test(c))return 'rmroot';
+  if(/\brm\b/.test(c))return 'rmws';
+  if(/kubectl|helm|argocd/.test(c)&&/prod/.test(c))return 'kubeprod';
+  if(/\baws\b|gcloud|az\s/.test(c))return 'awsprod';
+  if(/psql|mysql|mongo|redis-cli/.test(c)&&/prod/i.test(c))return 'psqlprod';
+  if(/git push.*\b(main|master|release)\b/.test(c))return 'pushmain';
+  if(/git push/.test(c))return 'pushfeat';
+  if(/gh pr merge|gh pr review.*approve|--admin/.test(c))return 'merge';
+  if(/npm i|npm install|pip install|go get|cargo add/.test(c))return 'npm';
+  if(/curl|wget|nc\s|ssh\s|scp\s/.test(c))return 'egress';
+  if(/\.env\b|id_rsa|credentials/.test(c))return 'env';
+  if(/^(make|npm test|pytest|go test|cargo test|ls|cat|grep|sed|awk|git (status|diff|log|add|commit)|pnpm|yarn)/.test(c))return 'ok';
+  if(/^(sudo|chmod|chown|mount|iptables|docker|podman)/.test(c))return 'unknown';
+  return 'human';
+}
+
+const BENEFITS=[
+ ['Faster first draft','Code, tests and PR descriptions start from a draft instead of a blank file. The human still owns every line, and the pipeline still proves it.'],
+ ['Failures explained','When a check fails, the assistant reads the log and explains it in the developer’s terms. Fewer context switches, faster loops back to step 2.'],
+ ['Compatibility by default','Migration shape suggestions and N-1 contract tests catch the class of bugs that only appear when the old version meets the new schema.'],
+ ['Reviews with better input','Advisory AI comments point reviewers at risky patterns and missing tests. Approval stays human, so review quality rises without rubber-stamping.'],
+ ['Incidents traced in minutes','Pseudonymous telemetry means the assistant can help on-call read it, and the audit chain links any incident to the exact deploy, merge, PR and session.'],
+ ['Spend you can see','Every call is metered to a team and a model. Budgets are real limits, not invoices that arrive later.'],
+ ['Nothing leaves the EU','Registry, egress and DLP make residency a property of the system, not a promise in a policy document.'],
+ ['Proof for auditors','Signed artifacts, provenance, human approvals and a hash-chained log give ISO 27001 control evidence as a by-product of normal work.'],
+];
+
+// ---- state & render
+let cur={kind:'step',id:1};
+function renderRail(){
+  const r=document.getElementById('rail'); r.innerHTML='';
+  STEPS.forEach(s=>{const d=document.createElement('div'); d.className='step';
+    const b=document.createElement('button'); b.type='button'; b.className=(s.who==='human'?'human':'')+(s.n===11?' prod':'');
+    b.innerHTML=`<span class="n">${String(s.n).padStart(2,'0')}</span><span class="t">${s.t}</span><span class="who">${s.who==='human'?'human decides':'automatic'}</span>`;
+    if(cur.kind==='step'&&cur.id===s.n)b.setAttribute('aria-current','step');
+    b.addEventListener('click',()=>{cur={kind:'step',id:s.n};render();});
+    d.appendChild(b);
+    (s.detours||[]).forEach(k=>{const x=document.createElement('button'); x.type='button'; x.className='detour'; x.textContent=DETOURS[k].t;
+      if(cur.kind==='detour'&&cur.id===k)x.setAttribute('aria-current','step');
+      x.addEventListener('click',()=>{cur={kind:'detour',id:k};render();}); d.appendChild(x);});
+    r.appendChild(d);});
+}
+function li(arr){return arr.map(x=>`<li>${x}</li>`).join('');}
+function esc(s){return s.replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));}
+function md(s){return esc(s).replace(/`([^`]+)`/g,'<span class="mono">$1</span>');}
+function renderDetail(){
+  const pane=document.getElementById('p-step');
+  if(cur.kind==='step'){
+    const s=STEPS[cur.id-1]; pane.classList.remove('detour-pane');
+    document.getElementById('st-title').textContent=`${String(s.n).padStart(2,'0')} · ${s.t}`;
+    document.getElementById('st-desc').innerHTML=md(s.desc);
+    document.getElementById('st-kv').innerHTML=Object.entries(s.kv).map(([k,v])=>`<dt>${k}</dt><dd>${md(v)}</dd>`).join('');
+    document.getElementById('st-events').innerHTML=s.events.map(e=>`<div class="ev">${esc(e)}</div>`).join('');
+    document.getElementById('ai-does').innerHTML=li(s.does.map(md));
+    document.getElementById('ai-cannot').innerHTML=li(s.cannot.map(md));
+    document.getElementById('st-controls').innerHTML=li(s.controls.map(md));
+    document.getElementById('st-enforced').innerHTML=md(s.enforced);
+  } else {
+    const d=DETOURS[cur.id]; pane.classList.add('detour-pane');
+    document.getElementById('st-title').textContent=`Detour · ${d.t}`;
+    document.getElementById('st-desc').innerHTML=md(d.desc);
+    document.getElementById('st-kv').innerHTML=`<dt>Leaves from</dt><dd>step ${String(d.from).padStart(2,'0')} · ${STEPS[d.from-1].t}</dd><dt>Returns to</dt><dd>step ${String(d.back).padStart(2,'0')} · ${STEPS[d.back-1].t}</dd><dt>Who acts</dt><dd>${md(d.who)}</dd>`;
+    document.getElementById('st-events').innerHTML=d.events.map(e=>`<div class="ev">${esc(e)}</div>`).join('');
+    document.getElementById('ai-does').innerHTML=`<li>${md(d.ai)}</li>`;
+    document.getElementById('ai-cannot').innerHTML=`<li>Decide the outcome of the detour. Every detour ends with a human or a pre-approved runbook, never the model.</li>`;
+    document.getElementById('st-controls').innerHTML=li(STEPS[d.from-1].controls.map(md));
+    document.getElementById('st-enforced').innerHTML=md(STEPS[d.from-1].enforced);
+  }
+}
+function render(){renderRail();renderDetail();}
+
+// can/cannot table
+document.querySelector('#cc tbody').innerHTML=CC.map(r=>`<tr><td>${md(r[0])}</td><td class="c ${r[1]}">${r[1]==='can'?'Can':'Cannot'}</td><td>${md(r[2])}</td><td>${md(r[3])}</td><td>${md(r[4])}</td></tr>`).join('');
+
+// simulator
+const samplesEl=document.getElementById('samples');
+SAMPLES.forEach(s=>{const b=document.createElement('button'); b.type='button'; b.className='sample'; b.textContent=s.c; b.addEventListener('click',()=>{document.getElementById('cmd').value=s.c; attempt();}); samplesEl.appendChild(b);});
+function attempt(){
+  const cmd=document.getElementById('cmd').value; const k=classify(cmd); const out=document.getElementById('layers'); const v=document.getElementById('sim-verdict'); const ev=document.getElementById('sim-event');
+  if(!k){v.className='verdict';v.textContent='Type or pick a command.';out.innerHTML='';ev.hidden=true;return;}
+  const r=RULES[k];
+  v.className='verdict '+(r.v==='allowed'?'allowed':r.v==='human'?'human':'blocked');
+  v.innerHTML=(r.v==='allowed'?'ALLOWED · executed and logged':r.v==='human'?'WAITS FOR A HUMAN · require_human':`BLOCKED at layer ${r.at+1}: ${LAYERS[r.at].split(' (')[0]}`)+`<div style="font-family:var(--body);font-weight:400;margin-top:4px">${md(r.why)}</div>`;
+  out.innerHTML=LAYERS.map((name,i)=>{const st=r.layers[i]; const label=st==='pass'?'OK':st==='stop'?'STOP':'n/a';
+    const [nm,detail]=name.split(' (');
+    return `<div class="layer ${st}"><span class="st">${label}</span><div><div>${nm}</div><div class="nm">${detail?detail.replace(')',''):''}</div></div></div>`;}).join('');
+  ev.hidden=false; ev.textContent=r.ev;
+}
+document.getElementById('run').addEventListener('click',attempt);
+document.getElementById('cmd').addEventListener('keydown',e=>{if(e.key==='Enter')attempt();});
+
+document.getElementById('benefits').innerHTML=BENEFITS.map(b=>`<div class="benefit"><b>${b[0]}</b><span>${b[1]}</span></div>`).join('');
+
+render();
+document.getElementById('cmd').value='kubectl delete pod -n prod api-1'; attempt();
+})();
+</script>

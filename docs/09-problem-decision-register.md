@@ -1,0 +1,262 @@
+# 09 — Problem & Decision Register
+
+**Project:** AI Governance Layer (AGL)
+**Status:** Living document. Started 2026-10-19.
+**Related:** [Decision Log](decision-log.md) (architecture decisions D-xx) · all numbered documents
+
+---
+
+## How this register works
+
+Every problem found in review, every gap discovered while building, and every decision that is not a pure architecture choice gets an entry here. An entry is written when the problem is found, not when it is solved, and it is updated until its status is `closed`.
+
+| Field | What goes there |
+|-------|-----------------|
+| **Problem** | What is wrong or undecided, who found it, how it was found |
+| **Why it matters** | The concrete failure or exposure if left alone |
+| **Fixes considered** | Each option, one line each |
+| **Thought process** | How the options were weighed; what was ruled out and why |
+| **Decision** | The option taken, or "open" with the owner and date needed |
+| **Pros / Cons** | Of the chosen option, honestly |
+| **Applied in** | Which document, file or configuration carries the change, or "not yet" |
+| **Status** | `open` · `decided` · `applied` · `verified` · `closed` · `rejected` |
+
+Statuses mean: *decided* = agreed but nothing changed yet; *applied* = documents or files changed; *verified* = a test or check proved it; *closed* = verified and no follow-up. When a decision becomes architectural, it also gets a D-xx entry in the Decision Log and the two link to each other.
+
+IDs are `PD-xx`, chronological.
+
+## Index
+
+| ID | Title | Status | Found |
+|----|-------|--------|-------|
+| PD-01 | Default classification for unlabelled repositories | applied | 2026-10-19 |
+| PD-02 | DDL forward reference and missing extension in the schema | verified | 2026-10-19 |
+| PD-03 | PoC must prove a repository can be fully quarantined from AI | verified | 2026-10-19 |
+| PD-04 | Customer-facing AI chat about parcel status | decided | 2026-10-19 |
+| PD-05 | Developers fixing bugs with AI without production data, zero vendor trust | decided (layer 3 open) | 2026-10-19 |
+| PD-06 | Auditing AI decisions: what to record and how to link it | decided | 2026-10-19 |
+| PD-07 | Agents on laptops inherit the operator's privileges | decided | 2026-10-19 |
+| PD-08 | Model weights are a supply chain | decided | 2026-10-19 |
+| PD-09 | The agent's output is also a data exit | open | 2026-10-19 |
+| PD-10 | Images signed before review; release accepts any signed digest | verified | 2026-10-19 |
+| PD-11 | CI executes untrusted PR code with privileges | applied | 2026-10-19 |
+| PD-12 | Long-lived GitOps tokens as repository secrets | applied | 2026-10-19 |
+| PD-13 | Audit evidence endpoint has no authentication in the example | applied | 2026-10-19 |
+| PD-14 | Squash merge drops the AI-Assisted trailer | open | 2026-10-19 |
+| PD-15 | `ai-label` check trusts the author | decided | 2026-10-19 |
+| PD-16 | CI runner location versus EU residency | open | 2026-10-19 |
+| PD-17 | Actions pinned to tags rather than commit SHAs | verified | 2026-10-19 |
+| PD-18 | Git hosting for the PoC: GitHub.com with a self-hosted runner on SERVER | applied | 2026-10-19 |
+| PD-19 | Demo application on self-hosted Supabase (SERVER) with Vercel frontend; release path without GitOps/kind | applied | 2026-10-19 |
+
+---
+
+## PD-01 — Default classification for unlabelled repositories
+
+**Problem.** Most repositories will have no `.classification` manifest at the start. Found while writing the TRD classification scheme.
+**Why it matters.** If unlabelled means PUBLIC or INTERNAL, confidential code goes to the widest set of models on day one.
+**Fixes considered.** (a) Default INTERNAL, classify later. (b) Default CONFIDENTIAL. (c) Block AI entirely until classified.
+**Thought process.** (a) is convenient and wrong in the direction that hurts. (c) stalls adoption and pushes people to shadow AI. (b) restricts model choice to EU zero-retention or self-hosted and turns classification into something teams want to do.
+**Decision.** (b). Also recorded as D-10.
+**Pros.** Safe by default; creates an incentive. **Cons.** Unlabelled repos cannot use the cheapest models; self-hosted tier may be needed earlier than planned.
+**Applied in.** TRD §8, schema `repository.classification default 'CONFIDENTIAL'`, Decision Log D-10.
+**Status.** applied.
+
+## PD-02 — DDL forward reference and missing extension
+
+**Problem.** `delegated_identity` referenced `repository` before it was created; the `price` exclusion constraint needed `btree_gist`. Found by loading the DDL into PostgreSQL 16.
+**Why it matters.** A schema document that does not load is not a schema document.
+**Fixes considered.** Reorder tables; or add the foreign key after `repository` exists. Add the extension.
+**Thought process.** Reordering breaks the document's narrative (identity before repositories). An `alter table` after the dependency keeps both.
+**Decision.** `alter table ... add constraint` after `repository`; `create extension btree_gist` at the top.
+**Pros.** Document reads in logical order and loads. **Cons.** One constraint lives away from its table.
+**Applied in.** Schema §3.1–3.2. Verified by a clean load (29 tables, later 31) and by constraint tests (append-only trigger, dual approval, non-EU region, quarantine guard all reject bad rows).
+**Status.** verified.
+
+## PD-03 — PoC must prove a repository can be fully quarantined
+
+**Problem.** The business requirement arrived mid-draft: an application repository must not be exposed to AI at all (no code, no DB, nothing from production) until defined certainties are met; total budget must hold; nothing leaves the EU; records must be immutable.
+**Why it matters.** The first PoC draft treated quarantine as a classification level; the requirement is a gate with evidence and sign-off, which classification alone does not express.
+**Fixes considered.** (a) Use RESTRICTED classification as "quarantined". (b) Add an explicit `ai_exposure` state with a gate checklist evaluated on every request.
+**Thought process.** (a) conflates "this data is secret" with "this repo has not yet been cleared". A repo can be INTERNAL and still uncleared. (b) makes the certainties data, so a missing item re-closes the door automatically.
+**Decision.** (b): `repository.ai_exposure`, `repository_ai_gate` with G1–G6, trigger that refuses `allowed` unless the gate holds, `dataset.mountable` false for anything prod-derived. PoC document restructured around four proofs PR-1..PR-4 with scenarios S19–S26.
+**Pros.** Gate is enforceable in the database and in policy; evidence is attached to the gate row. **Cons.** More control-plane state to keep accurate; gate items G2–G4 need automated feeders or they rot.
+**Applied in.** PoC §1.1, schema §3.2. Trigger verified in PostgreSQL.
+**Status.** verified.
+
+## PD-04 — Customer-facing AI chat about parcel status
+
+**Problem.** A customer could ask an AI assistant about their parcel. Raised as a what-if.
+**Why it matters.** Customer messages contain personal data; the assistant could be talked into another customer's parcel; the model vendor would see customer data.
+**Fixes considered.** (a) Give the model a tool that queries the tracking database with the customer's token. (b) The backend resolves identity and parcels deterministically and hands the model a de-identified status object; the model only writes language; the backend fills names after.
+**Thought process.** (a) puts authorization in the prompt, where injection lives. (b) keeps authorization in code, removes personal data from the model path, and makes the choice of model a cost and residency question rather than a trust question.
+**Decision.** (b), plus DLP on inbound customer messages, content store with short retention and erasure, per-service budget and per-customer rate limits, AI Act transparency notice, human handoff.
+**Pros.** No PII reaches any model; injection cannot cross customers. **Cons.** Less flexible answers; backend templating work; some questions must go to a human.
+**Applied in.** Discussion only; not yet in the documents. Candidate for document 10 (customer AI surface).
+**Status.** decided.
+
+## PD-05 — Developers fixing bugs with AI without production data, zero vendor trust
+
+**Problem.** Teams need to update code, read audit logs and fix bugs with AI help, but no production data may leave the infrastructure and no vendor contract is trusted for personal data.
+**Why it matters.** Debugging is where production data leaks into prompts.
+**Fixes considered.** Layer 1: telemetry contains no personal data by design (pseudonymous IDs, redaction in the log pipeline). Layer 2: masked, production-shaped replica for reproduction. Layer 3: read-only, no-egress analysis enclave with a self-hosted model inside the production boundary, used only by on-call humans under exception.
+**Thought process.** Layers 1 and 2 cover most bugs and keep the "AI never touches production" rule intact. Layer 3 bends it from "never reads" to "never acts, never exports" and therefore needs explicit risk acceptance. Open-weight models run on our own hardware involve no data exchange with the model's author, which answers the "no handshake" concern.
+**Decision.** Layers 1 and 2 adopted. Layer 3 is an option requiring risk acceptance and a dual-approved exception per use; not adopted by default. Registry: only `EU_SELF_HOSTED` for CONFIDENTIAL, nothing for RESTRICTED.
+**Pros.** Most work needs no bend; vendor trust removed from the PII path. **Cons.** GPU cost; open weights lag frontier quality; layer 3, if adopted, is a standing exception that auditors will ask about.
+**Applied in.** Discussion; TRD §4.4 partially. Candidate for document 10.
+**Status.** decided (layer 3 open; owner CISO).
+
+## PD-06 — Auditing AI decisions
+
+**Problem.** How to track what an AI decided and prevent it from acting on its own judgment. Raised as a question.
+**Why it matters.** Without a per-action record, an incident cannot be traced to a session, and denied attempts (the most informative events) are lost.
+**Fixes considered.** Record the model's reasoning; or record inputs, outputs and actions with a session link.
+**Thought process.** Reasoning text is not a reliable account of why a system acted. Inputs, outputs and tool calls are. Every tool call becomes two events (requested; executed or denied) evaluated by the same policy engine that judges prompts, so the record of what was attempted is produced by the component that prevents it.
+**Decision.** Add `agent_action_requested` / `agent_action_executed` / `agent_action_denied` events with session ID and delegated identity; record model name and version on every event; sample sessions for human review. Containment in six layers (nothing to kill, explicit tools, policy gate per action, OS limits, no production path, caps and kill switch).
+**Pros.** Full trace from incident to session; denied attempts visible. **Cons.** Event volume; the pre-tool hook depends on the agent CLI supporting it, which becomes a procurement requirement.
+**Applied in.** Discussion. Schema change pending (event types, session link).
+**Status.** decided.
+
+## PD-07 — Agents on laptops inherit the operator's privileges
+
+**Problem.** Every enforcement row assumed the agent runs in a sandbox. Nothing forced that. An agent CLI on a laptop is the developer; if the developer has production credentials in the shell, so does the agent. Found by re-reading the enforcement table after being asked what was missing.
+**Why it matters.** "No AI identity holds production permissions" becomes true and useless. Org policies keyed on an `agent=true` tag never fire.
+**Fixes considered.** (a) Forbid local agent use entirely. (b) Allow local use, but remove standing production credentials from workstations (privileged access management with just-in-time sessions on a jump host without agent tooling), set the gateway as the only model endpoint via managed settings, and treat the pipeline as the enforcement point for everything the agent produces.
+**Thought process.** (a) is unenforceable in practice and drives shadow use. (b) accepts that the laptop is untrusted and makes the two things that matter (credentials, data) unavailable there. The business confirmed local Claude Code is acceptable.
+**Decision.** (b). Privileged access management for humans becomes a prerequisite of the isolation claim, moved into Phase 0/3 scope.
+**Pros.** Developer experience preserved; one fewer system to force people into. **Cons.** No delegated identity and no step cap on the laptop; long-running autonomous sessions must still use the sandbox orchestrator.
+**Applied in.** Document 08 §0 and §5. Implementation plan not yet updated with the PAM prerequisite.
+**Status.** decided.
+
+## PD-08 — Model weights are a supply chain
+
+**Problem.** Self-hosting removes the vendor contract but introduces trust in a weights file. Found while answering PD-05.
+**Why it matters.** A tampered or malicious model file executes inside the most trusted tier.
+**Fixes considered.** Pin versions; verify hashes and signatures at download; accept only `safetensors`; scan and quarantine before approval; record the weight digest in the registry.
+**Decision.** All of the above; weight digest becomes a registry field so events are attributable to a specific binary.
+**Pros.** Cheap; standard. **Cons.** Signature availability varies by publisher; some models only ship in formats that must be converted.
+**Applied in.** Not yet (registry field and F-08 step to add).
+**Status.** decided.
+
+## PD-09 — The agent's output is also a data exit
+
+**Problem.** All controls govern what goes into a model. The agent also writes commits, PR text, fixtures and CI logs, which land in the Git host and runners, possibly outside the EU, without touching the gateway.
+**Why it matters.** A fixture with real customer data or a pasted log in a PR comment leaves the region silently.
+**Fixes considered.** DLP on the push path (pre-receive hook or CI check on the diff and PR body); DLP on CI log output; residency assessment of the Git host and runners like any model vendor; EU self-hosted runners.
+**Thought process.** The pipeline already has a secrets scan; extending it to personal-data patterns on diffs and PR bodies is small. The runner and host location is a business decision (see PD-16).
+**Decision.** Open. Owner: security + platform. Needed before Phase 2 exit.
+**Status.** open.
+
+## PD-10 — Images signed before review; release accepts any signed digest
+
+**Problem.** In the example pipeline, Gate 2 signs the image on every PR; the release workflow and the admission policy only check that the certificate identity is the merge-candidate workflow. A digest built from an unreviewed PR is therefore releasable via the `workflow_dispatch` input. Found in a self-review of the pipeline examples.
+**Why it matters.** The human release approval sees a digest, not its origin; the "only reviewed code ships" claim fails.
+**Fixes considered.** (a) Sign only on main / merge-group runs. (b) Keep signing on PRs for preview, but verify the source ref in the certificate (Sigstore embeds it) and derive the release digest from the main commit instead of accepting it as input. (c) Separate attestation types for preview vs release.
+**Thought process.** (a) loses "the digest that passed Gate 2 is the one that ships" unless the merge queue rebuilds, which it does; acceptable. (b) keeps build-once and adds a precise check. (c) is a complement to either.
+**Decision.** (b) + (c): verify `source_repository_ref` is `refs/heads/main` or a merge-group ref, both in release and in cluster admission; remove the free-form digest input; preview images get an unprivileged attestation.
+**Pros.** Build once preserved; precise provenance check. **Cons.** Admission policy becomes more specific and must be kept in sync with the workflow file name and ref patterns.
+**Applied in.** `merge-candidate.yml` (release signature only on `merge_group`; preview attestation on PRs), `release.yml` (digest derived from main's SHA; `cosign verify` checks repository, workflow ref under `gh-readonly-queue/main`, trigger `merge_group`, SHA; no digest input), `admission/kyverno-verify-images.yaml`. actionlint passes.
+**Status.** verified (static). Not yet exercised against a live repository.
+
+## PD-11 — CI executes untrusted PR code with privileges
+
+**Problem.** `make build` runs whatever the PR's Makefile says, in jobs that hold a write-capable `GITHUB_TOKEN`, an OIDC token and preview deployment credentials. Found in the same self-review.
+**Why it matters.** Code executes before review with credentials in hand; an AI-suggested change is enough.
+**Fixes considered.** Read-only tokens on PR-triggered jobs; preview deploy in a separate job bound to a `preview` environment whose credentials reach only the preview namespace; OIDC trust policies restricted by ref and environment claims; ephemeral runners.
+**Decision.** All four.
+**Pros.** Standard hardening; no functional loss. **Cons.** More jobs and environments to manage; preview credentials need their own rotation.
+**Applied in.** `pr-checks.yml` and `merge-candidate.yml`: top-level `contents: read`; per-job permissions; `preview` job bound to the `preview` environment with `id-token: write` scoped by environment claim; README lists the OIDC trust-policy and ephemeral-runner requirements.
+**Status.** applied.
+
+## PD-12 — Long-lived GitOps tokens as repository secrets
+
+**Problem.** `GITOPS_TOKEN_PROD` as a repository secret is reachable by any workflow on main.
+**Why it matters.** Anyone who lands a workflow change on main can push to the production GitOps repository without the environment approval.
+**Fixes considered.** Environment secret of `production` (only materialises after approval); GitHub App installation token with short life; branch protection on the GitOps repository limiting that identity to digest bumps under its own path.
+**Decision.** All three.
+**Pros.** Secret only exists post-approval. **Cons.** GitHub App setup and a second protected repository to maintain.
+**Applied in.** `release.yml`: `actions/create-github-app-token` mints a short-lived token from `GITOPS_APP_ID` / `GITOPS_APP_PRIVATE_KEY` held as environment secrets of `staging` and `production`; README documents the GitOps repository protection.
+**Status.** applied.
+
+## PD-13 — Audit evidence endpoint has no authentication in the example
+
+**Problem.** CI posts merge and deploy events to the audit store with a bare `curl`.
+**Why it matters.** A hash chain proves order and integrity, not authenticity of the source; anyone could forge a deploy event.
+**Decision.** CI presents its OIDC token; the gateway verifies issuer, repository and workflow claims and stamps them into the event.
+**Pros.** Keyless, matches cosign. **Cons.** The audit API must validate GitHub's OIDC, one more dependency.
+**Applied in.** `merge-candidate.yml` evidence job and `release.yml` production job request an OIDC token (`audience=agl-audit`) and send it as `Authorization: Bearer`; jobs carry `id-token: write`. The audit API side is a Phase 1 deliverable.
+**Status.** applied.
+
+## PD-14 — Squash merge drops the AI-Assisted trailer
+
+**Problem.** The ruleset uses squash in the merge queue; the squash commit loses individual commit messages and signatures.
+**Why it matters.** The marker survives on the PR label and the merge event, but main's history no longer shows it.
+**Fixes considered.** Merge commits (keep original signed commits; history not linear). Rebase (re-signs commits with GitHub's key; original signatures lost). Squash with the trailer preserved in the squash body.
+**Thought process.** Trade-off between a linear history and preserving the developers' own signatures. The audit chain is the system of record either way.
+**Decision.** Open. Owner: engineering lead.
+**Status.** open.
+
+## PD-15 — `ai-label` check trusts the author
+
+**Problem.** Detection is based on a commit trailer the author controls.
+**Why it matters.** Unlabelled AI-assisted PRs escape the stronger review requirement.
+**Fixes considered.** Cross-check with gateway telemetry (agent-type calls by this identity on this repository and branch during the PR's lifetime); treat a mismatch as a failed check with a human override.
+**Decision.** Add the telemetry cross-check as a required check once the gateway exposes a query API.
+**Pros.** Label becomes evidence-backed. **Cons.** Correlation is by identity and repo, not by diff; false positives when a developer used the agent for an unrelated task.
+**Applied in.** TRD SDLC-02 mentions it; workflow does not implement it.
+**Status.** decided.
+
+## PD-16 — CI runner location versus EU residency
+
+**Problem.** GitHub-hosted runners run outside the EU; Gate 2 builds and the preview deploy run there with source code and masked data.
+**Why it matters.** Whether source code leaving the region violates the residency rule is a business decision not yet taken.
+**Fixes considered.** Accept for code and masked data, forbid for anything higher; or EU self-hosted ephemeral runners for all workflows.
+**Decision.** Open. Owner: CISO with legal. Needed in Phase 0.
+**Status.** open.
+
+## PD-17 — Actions pinned to tags rather than commit SHAs
+
+**Problem.** Example workflows use `@v4`-style tags.
+**Why it matters.** A moved tag changes the code that runs in the pipeline.
+**Decision.** Pin to commit SHAs with `ratchet`, keeping the `# ratchet:` comment so `ratchet update` can refresh them. Trivy tag corrected from a non-existent `0.28.0` to `v0.35.0`; conftest to `v0.4.0`.
+**Applied in.** All three workflows; 30 references pinned; actionlint passes.
+**Status.** verified.
+
+## PD-18 — Git hosting for the PoC
+
+**Problem.** The PoC needs a git host and CI. Two machines are available (SERVER with Docker, a Mac), connected over Tailscale, with DNS under `shortandsweet.home.ro`.
+**Why it matters.** The Tier 2 proofs (S15–S18) depend on rulesets, a merge queue and a human-only environment approval. The residency proof depends on where code and builds run.
+**Fixes considered.** (a) Forgejo on SERVER with a Forgejo runner and registry. (b) GitHub.com for the repository with a self-hosted ephemeral runner on SERVER joined to the tailnet. (c) GitHub.com with GitHub-hosted runners only.
+**Thought process.** (a) keeps everything on owned hardware but has no environment-approval gate, so S18 would be emulated with a protected branch, weakening the demo of the second human-in-the-loop point. (c) runs builds and previews off SERVER, so previews cannot reach SERVER's services and the "stays on our hardware" story is lost. (b) keeps the `pipeline/` files exact and keeps builds and previews on SERVER, at the cost of source code and PR metadata living on GitHub.com (the PD-16 trade-off, accepted for a PoC with synthetic code).
+**Decision.** (b). Private repository; ephemeral `actions/runner` container with a Docker-in-Docker sidecar on `ci-net`, not on `agl-net`; `runs-on` driven by the repository variable `AGL_RUNNER`.
+**Pros.** Exact workflows, real environment approvals, builds on owned hardware. **Cons.** Self-hosted runner executes PR code on SERVER, so the PD-11 conditions (ephemeral, DinD, read-only token, private repo) are mandatory; code leaves SERVER to GitHub.
+**Applied in.** PoC §10.5 (git decision table, bring-up step 8); workflows `runs-on: ${{ vars.AGL_RUNNER || 'ubuntu-latest' }}`; pipeline README. actionlint passes.
+**Status.** applied.
+
+## PD-19 — Demo application on Supabase + Vercel; release path without a cluster
+
+**Problem.** The PoC needed a real application to govern, not only a gateway. Proposal: the parcel app with a self-hosted Supabase backend on SERVER and a Next.js frontend deployed by Vercel.
+**Why it matters.** With a real backend the data proofs (per-role views, quarantine, masked previews) run against real tables and row-level security instead of a static page, and the release path has a real production database to protect.
+**Fixes considered.** (a) Keep the kind + Kyverno + Argo CD path and containerise the app. (b) Replace the cluster path: production release = apply migrations to the production Supabase and deploy the prebuilt frontend to Vercel, both inside the human-approved `production` job; previews = Vercel preview deployments against a preview Supabase stack with masked data on SERVER. (c) Supabase cloud (EU region) instead of self-hosted.
+**Thought process.** (a) adds a cluster nobody needs for this app and hides the point. (b) keeps every control (two human gates, build once, signed artifact, env-scoped credentials) and maps onto what the team would actually run. (c) is a legitimate production option (EU region, managed) but loses the "production is on our hardware" proof for the PoC; keep as a Phase 1 option. Vercel is a US platform: the frontend bundle and build logs go there, the browser on the Mac reaches the private backend over the tailnet, so no backend data touches Vercel. Recorded as a PD-16-class trade-off.
+**Decision.** (b). Three Supabase stacks on SERVER (`preview`, `staging`, `production`) on separate Docker networks; production reachable only through Caddy and only by the browser on the tailnet and the dedicated release runner; the image signature check is replaced by a signed, digest-pinned prebuilt frontend artifact and a migration checksum recorded in the release candidate; kind/Kyverno/Argo CD removed from the PoC scope.
+**Pros.** Real app, real RLS, real previews, simpler stack. **Cons.** Frontend code and build logs on Vercel; a release runner with a route to the production network must exist and is the most sensitive component on SERVER; Supabase self-hosting is a sizeable Compose stack per environment (memory).
+**Applied in.** PoC §10.6; `pipeline/.github/workflows/merge-candidate-paas.yml` and `release-paas.yml` (prebuilt artifact hashed and blob-signed in merge-queue runs only; release finds the merge-queue run for main's SHA, verifies the bundle by workflow, trigger and SHA, refuses preview markers; production job on the `server-release` runner compares migration checksums before `supabase db push`; frontend rollback by dispatch). Actions pinned by ratchet; linted with actionlint. Not yet run against a live repository.
+**Status.** applied.
+
+---
+
+## Template for new entries
+
+```
+## PD-xx — Title
+
+**Problem.**
+**Why it matters.**
+**Fixes considered.**
+**Thought process.**
+**Decision.**
+**Pros.** **Cons.**
+**Applied in.**
+**Status.**
+```
