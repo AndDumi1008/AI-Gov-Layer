@@ -1,0 +1,9 @@
+# gitleaks configuration for this repository.
+# The only "secrets" in history are synthetic test patterns used to prove DLP detection.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "synthetic credential patterns used by DLP tests and the demo script"
+regexes = ['''AKIAABCDEFGHIJKLMNOP''', '''sk_live_abc''', '''supersecretvalue123''']
+paths = ['''stack/gateway/tests/.*''', '''demo/run-scenarios.sh''', '''docs/.*\.md''']

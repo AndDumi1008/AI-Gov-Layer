@@ -7,7 +7,8 @@
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 
-DECL_FILES=(.env.example config/schema.env)
+# every .env.example in the repo (one per deployable unit) plus an optional config schema
+DECL_FILES=(); while IFS= read -r f; do [ -n "$f" ] && DECL_FILES+=("$f"); done < <( (git ls-files --cached --others --exclude-standard 2>/dev/null | grep -E '(^|/)\.env\.example$|(^|/)config/schema\.env$') || find . -name .env.example -not -path '*/node_modules/*')
 SRC_GLOBS=(--include='*.js' --include='*.ts' --include='*.tsx' --include='*.py' --include='*.go' --include='*.rb' --include='*.java' --include='*.kt' --include='*.cs' --include='*.php' --include='*.yaml' --include='*.yml' --include='*.toml' --include='*.sh')
 EXCLUDES=(--exclude-dir=node_modules --exclude-dir=.git --exclude-dir=vendor --exclude-dir=dist --exclude-dir=build --exclude-dir=.venv)
 fail=0
@@ -24,9 +25,13 @@ if [ -z "$declared" ]; then
 fi
 
 # Variables read in code (common patterns)
-used=$(grep -rhoE \
-  'process\.env\.[A-Z][A-Z0-9_]+|process\.env\[["'"'"'][A-Z][A-Z0-9_]+|os\.environ(\.get)?\(?\[?["'"'"'][A-Z][A-Z0-9_]+|os\.getenv\(["'"'"'][A-Z][A-Z0-9_]+|os\.Getenv\("[A-Z][A-Z0-9_]+|ENV\[["'"'"'][A-Z][A-Z0-9_]+|System\.getenv\("[A-Z][A-Z0-9_]+|\$\{[A-Z][A-Z0-9_]+\}' \
-  "${SRC_GLOBS[@]}" "${EXCLUDES[@]}" . 2>/dev/null | grep -oE '[A-Z][A-Z0-9_]{2,}' | sort -u || true)
+# code: explicit environment reads; manifests (yaml/toml/json): ${VAR} interpolation. Shell-local $VARS are not env reads;
+# .github/ is excluded because workflow env is declared inside the workflow file itself.
+used=$( { grep -rhoE \
+  'process\.env\.[A-Z][A-Z0-9_]+|process\.env\[["'"'"'][A-Z][A-Z0-9_]+|os\.environ(\.get)?\(?\[?["'"'"'][A-Z][A-Z0-9_]+|os\.getenv\(["'"'"'][A-Z][A-Z0-9_]+|os\.Getenv\("[A-Z][A-Z0-9_]+|ENV\[["'"'"'][A-Z][A-Z0-9_]+|System\.getenv\("[A-Z][A-Z0-9_]+' \
+  "${SRC_GLOBS[@]}" "${EXCLUDES[@]}" . 2>/dev/null; \
+  grep -rhoE '\$\{[A-Z][A-Z0-9_]+(:-[^}]*)?\}' --include='*.yaml' --include='*.yml' --include='*.toml' --include='*.json' "${EXCLUDES[@]}" --exclude-dir=.github . 2>/dev/null; } \
+  | grep -oE '[A-Z][A-Z0-9_]{2,}' | sort -u || true)
 
 # Rule 1
 ignore_re='^(PATH|HOME|USER|SHELL|PWD|TERM|LANG|TZ|CI|GITHUB_[A-Z_]+|RUNNER_[A-Z_]+|NODE_ENV|GOOS|GOARCH|JAVA_HOME)$'

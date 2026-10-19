@@ -3,7 +3,7 @@ import os
 def env(name: str, default: str = "") -> str:
     return os.environ.get(name, default)
 
-DATABASE_URL = env("DATABASE_URL", "postgresql://agl_gateway:agl_gateway_dev@localhost:5432/postgres")
+DATABASE_URL = env("DATABASE_URL", "postgresql://agl_gateway@localhost:5432/postgres")
 OPA_URL = env("OPA_URL", "http://localhost:8181")
 MINIO_URL = env("MINIO_URL", "http://localhost:9000")
 MINIO_USER = env("MINIO_ROOT_USER", "agl-audit")

@@ -18,3 +18,22 @@ Order of operations (docs/07 §10.5 and §10.7). Steps marked **(you)** need the
 | 12 | Tier 2: GitHub org + repos, runner container, Supabase stacks | later | `runner/` |
 
 Security posture of the result: only 443 (Caddy) and 22 (SSH) are reachable, and only from the Tailscale range; the governance network has no published ports and no route out except the egress proxy; model weights enter through an explicit pull job, not from inside the stack.
+
+## On SERVER, step by step (WSL 2 shell)
+
+```bash
+# inside the WSL distro (Ubuntu), in the Linux filesystem, not /mnt/c
+git clone https://github.com/AndDumi1008/AI-Gov-Layer.git ~/AI-Gov-Layer && cd ~/AI-Gov-Layer
+cp stack/.env.example stack/.env
+# edit stack/.env: BIND_IP=<SERVER Tailscale IP>, SERVER_TS_IP=<same>, real passwords,
+#   AGL_EXTERNAL_BACKEND=anthropic, ANTHROPIC_API_KEY=<typed by you>,
+#   AGL_LOCAL_BACKEND_URL=http://ollama:11434, AGL_LOCAL_MODEL=qwen2.5-coder:7b
+make up-server                          # core + model (GPU overlay) + edge (caddy, coredns)
+deploy/server/pull-model.sh             # side-load the weights (one-off container)
+docker build -t agl-sandbox:latest stack/sandbox
+AGL_URL=http://<SERVER Tailscale IP>:4000 ./demo/run-scenarios.sh    # before DNS/TLS
+```
+
+After the Tailscale split-DNS rule and the CA trust on the Mac: `AGL_URL=https://gateway.shortandsweet.home.ro ./demo/run-scenarios.sh` from the Mac.
+
+Docker Desktop on Windows notes: the `gpu` overlay needs "Enable GPU support" in Docker Desktop settings; `make up-server` uses `docker compose -f stack/docker-compose.yml -f stack/docker-compose.gpu.yml`. If the GPU is not available, start without the overlay and the 1.5b model (`AGL_LOCAL_MODEL=qwen2.5-coder:1.5b`) runs on CPU.

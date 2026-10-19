@@ -58,6 +58,7 @@ IDs are `PD-xx`, chronological.
 | PD-27 | Gateway design for the PoC: own FastAPI service, non-streaming backends, synthesized SSE | decided | 2026-10-19 |
 | PD-28 | One anchor per day is wrong: anchors need a cut-off and a day may hold several | verified | 2026-10-19 |
 | PD-29 | The in-stack model server cannot pull weights; weights are side-loaded by an explicit job | verified | 2026-10-19 |
+| PD-30 | Gateway database password was a fixed string in the migration and the example env | verified | 2026-10-20 |
 
 ---
 
@@ -345,6 +346,16 @@ IDs are `PD-xx`, chronological.
 **Decision.** `deploy/server/pull-model.sh` (one-off container with its own server process, shared `agl_ollama-models` volume). No egress allowlist entry for model registries. Registry `model.version` is to carry the weight digest (field exists; filling it is a Phase 1 task).
 **Pros.** Weights provenance is a visible step; the stack's network stays closed. **Cons.** Manual step per model update.
 **Applied in.** `deploy/server/pull-model.sh`, docs/07 §9.1. Verified: CONFIDENTIAL request answered by Qwen via `code-local` after side-loading.
+**Status.** verified.
+
+## PD-30 — A fixed database password in the repository
+
+**Problem.** `002_poc.sql` created the gateway role with the literal password `agl_gateway_dev`, and `.env.example` carried the same value. Found by running our own `check-env-vars.sh` on this repository before the first push: rule 4 flagged a secret-like variable with a non-placeholder value.
+**Why it matters.** Every deployment, including SERVER, would share a password that is public in the repository. The network isolation would be the only thing protecting the database.
+**Fixes considered.** Keep it and rely on the internal network (rejected); set the password in the migration from an environment variable (SQL cannot read the environment); a shell init script in the PostgreSQL image entrypoint that alters the role's password from `AGL_GATEWAY_DB_PASSWORD`.
+**Decision.** `003_gateway_password.sh` sets the password at first initialisation and refuses placeholder values; `bootstrap.sh` refuses to start with any `changeme` password unless explicitly allowed for a throw-away laptop; `.env.example` holds placeholders only; the gateway's default connection string has no password. The repository's own `.gitleaks.toml` allowlists the synthetic test patterns so the secrets check stays meaningful.
+**Pros.** No credential in git; the pipeline's own rule caught it, which is the point of having the rule. **Cons.** First-time setup needs a real value in `.env` before anything starts.
+**Applied in.** `stack/schema/002_poc.sql`, `003_gateway_password.sh`, `stack/.env.example`, `stack/bootstrap.sh`, `gateway/app/config.py`, `.gitleaks.toml`. Verified: fresh stack starts with the environment password; suite passes.
 **Status.** verified.
 
 ---

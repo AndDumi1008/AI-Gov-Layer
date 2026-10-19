@@ -38,10 +38,11 @@ language sql stable as $$
   group by e.id
 $$;
 
--- 4. Roles used by the gateway (passwords set by bootstrap; defaults for local dev).
+-- 4. Role used by the gateway. The password is NOT in this file: 003_gateway_password.sh sets it from
+--    AGL_GATEWAY_DB_PASSWORD at first start (PD-30). Until then the role cannot log in.
 do $$ begin
   if not exists (select 1 from pg_roles where rolname = 'agl_gateway') then
-    create role agl_gateway login password 'agl_gateway_dev';
+    create role agl_gateway login;
   end if;
 end $$;
 grant usage on schema public to agl_gateway;
