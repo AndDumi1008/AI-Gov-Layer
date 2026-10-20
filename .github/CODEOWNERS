@@ -1,0 +1,5 @@
+# Sensitive paths. When a second human account exists, replace with a team and require code-owner review in the ruleset.
+/stack/policy/     @AndDumi1008
+/stack/schema/     @AndDumi1008
+/pipeline/         @AndDumi1008
+/.github/          @AndDumi1008
