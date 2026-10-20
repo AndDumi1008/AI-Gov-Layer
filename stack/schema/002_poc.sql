@@ -27,10 +27,14 @@ alter table audit_anchor add column anchored_through timestamptz not null defaul
 create or replace function budget_state(p_scope envelope_scope, p_scope_id uuid, p_at timestamptz default now())
 returns table (envelope_id uuid, amount_eur numeric, consumed_eur numeric, pct numeric, soft_pct smallint[])
 language sql stable as $$
-  select e.id, e.amount_eur,
-         coalesce(sum(l.amount_eur) filter (where l.kind in ('reserve','settle','adjustment')),0) as consumed_eur,
-         case when e.amount_eur = 0 then 100
-              else round(100 * coalesce(sum(l.amount_eur) filter (where l.kind in ('reserve','settle','adjustment')),0) / e.amount_eur, 2) end as pct,
+  -- amount_eur = envelope + approved top-ups (adjustments are stored as negative lines);
+  -- consumed_eur = reservations + settlements; pct = consumed / effective envelope.
+  select e.id,
+         e.amount_eur - coalesce(sum(l.amount_eur) filter (where l.kind = 'adjustment'),0) as amount_eur,
+         coalesce(sum(l.amount_eur) filter (where l.kind in ('reserve','settle')),0) as consumed_eur,
+         case when e.amount_eur - coalesce(sum(l.amount_eur) filter (where l.kind = 'adjustment'),0) <= 0 then 100
+              else round(100 * coalesce(sum(l.amount_eur) filter (where l.kind in ('reserve','settle')),0)
+                         / (e.amount_eur - coalesce(sum(l.amount_eur) filter (where l.kind = 'adjustment'),0)), 2) end as pct,
          e.soft_pct
   from budget_envelope e left join budget_ledger l on l.envelope_id = e.id
   where e.scope = p_scope and e.scope_id = p_scope_id and e.status = 'open'

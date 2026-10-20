@@ -27,6 +27,8 @@ Model weights: the in-stack `ollama` has no route to any registry; load weights 
 
 Model aliases: `code-default` (external; `AGL_EXTERNAL_BACKEND=anthropic|mock`, evaluating under a 72 h exception) · `code-local` (self-hosted; CONFIDENTIAL goes here automatically).
 
+Web chat: `https://chat.shortandsweet.home.ro:8443` (or `http://127.0.0.1:4000/chat` locally): connect as a seeded user, see team, roles, training and budget, and get the gateway verdict, model, cost and audit link on every answer.
+
 Claude Code on the Mac: `ANTHROPIC_BASE_URL=https://gateway.shortandsweet.home.ro` (or `http://127.0.0.1:4000` locally) and `ANTHROPIC_AUTH_TOKEN=$(cat ~/.agl/token)`.
 
 Stand-ins and their production replacements are listed in docs/07 §7 and §10.4.

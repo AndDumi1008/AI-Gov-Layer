@@ -11,6 +11,7 @@ Audience: the people who decide whether AI can be adopted under the ISMS (CISO, 
 | Fresh token for Claude Code | `agl login --as dana`, copy `evidence/managed-settings.json` to the system path (sudo) |
 | Reset the control plane (logged) | `make demo-server-reset` the evening before, or `agl demo-reset` as sven/ines live, to show that the reset is itself an audit event |
 | Open browser tabs | The two interactive pages (Parcel Data Journey, Code to Production Journey). There is no MinIO web console in this build; Object Lock is shown live with `make demo-worm` |
+| Chat tab | `https://chat.shortandsweet.home.ro:8443`: the same door with a face; use it for acts 2–4 if the audience is not terminal-minded. It shows who is connected and the verdict chips per answer |
 | Terminal font large | the audience reads the headers `X-AGL-Decision`, `X-AGL-Model`, `X-AGL-Rerouted` |
 
 Set once in the demo terminal:

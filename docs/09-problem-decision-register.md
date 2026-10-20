@@ -65,6 +65,7 @@ IDs are `PD-xx`, chronological.
 | PD-34 | Firewall and ACL must list the real ports (22, 53, 4000, 8443); the first versions blocked the tailnet | verified | 2026-10-20 |
 | PD-35 | Claude Code through the gateway: env token wins over stored login, except when launched inside the desktop app | verified | 2026-10-20 |
 | PD-36 | No MinIO web console in current builds; Object Lock shown with the mc client | applied | 2026-10-20 |
+| PD-37 | Top-ups counted as negative consumption produced negative utilisation; now they enlarge the envelope | verified | 2026-10-20 |
 
 ---
 
@@ -403,6 +404,12 @@ IDs are `PD-xx`, chronological.
 **Fixes considered.** A third-party S3 browser container (another component to assess); or show the store with the `mc` client.
 **Decision.** `demo/show-worm.sh` (`make demo-worm`): lock configuration, newest segments, retention mode and expiry, versions, a refused delete of all versions, and the anchors in the second store. The Caddy hostnames for the consoles were removed. In production the cloud provider's console or an internal dashboard replaces this.
 **Status.** applied (verified on SERVER).
+
+## PD-37 — Budget utilisation after a top-up
+
+**Problem.** The web chat showed the org budget at "-49 %" after the demo's €1 top-up on a €2 envelope: `budget_state` summed adjustments (stored as negative lines) into consumption.
+**Decision.** A top-up enlarges the envelope: `amount_eur` = envelope minus the (negative) adjustments, `consumed_eur` = reservations plus settlements, `pct` = consumed / effective envelope. Policy thresholds use `pct` and need no change.
+**Status.** verified (function replaced live on SERVER; whoami shows a positive utilisation).
 
 ---
 
