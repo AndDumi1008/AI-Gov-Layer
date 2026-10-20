@@ -66,6 +66,7 @@ IDs are `PD-xx`, chronological.
 | PD-35 | Claude Code through the gateway: env token wins over stored login, except when launched inside the desktop app | verified | 2026-10-20 |
 | PD-36 | No MinIO web console in current builds; Object Lock shown with the mc client | applied | 2026-10-20 |
 | PD-37 | Top-ups counted as negative consumption produced negative utilisation; now they enlarge the envelope | verified | 2026-10-20 |
+| PD-38 | The PoC was built by an ungoverned agent session with full operator privileges | open | 2026-10-20 |
 
 ---
 
@@ -410,6 +411,16 @@ IDs are `PD-xx`, chronological.
 **Problem.** The web chat showed the org budget at "-49 %" after the demo's €1 top-up on a €2 envelope: `budget_state` summed adjustments (stored as negative lines) into consumption.
 **Decision.** A top-up enlarges the envelope: `amount_eur` = envelope minus the (negative) adjustments, `consumed_eur` = reservations plus settlements, `pct` = consumed / effective envelope. Policy thresholds use `pct` and need no change.
 **Status.** verified (function replaced live on SERVER; whoami shows a positive utilisation).
+
+## PD-38 — The sessions that built this PoC were not governed by it
+
+**Problem.** Every document, file and deployment step in this repository was produced by Claude Code running inside the Claude desktop app, signed in with the owner's Anthropic account. Those sessions did not pass through the gateway: the desktop app sends its own OAuth token directly to Anthropic's API (observed in PD-35), so the managed settings do not apply to it. No DLP, classification, budget metering or audit event covered them. The sessions also ran with the operator's full privileges: SSH key to SERVER, Docker engine there, git push to GitHub, sudo commands handed to the operator. The only control was the desktop app's per-command permission prompt, which the operator used.
+**Why it matters.** This is the PD-07 case in practice, inside the project that documents it. SERVER's `.env` (passwords, but not the Anthropic key, which was never printed), tailnet addresses and the Windows user name went to Anthropic under a consumer agreement. For a PoC on synthetic data with an informed operator this is acceptable; for a real repository it is exactly what the rules forbid.
+**Fixes considered.** (a) Route desktop-app sessions through the gateway: not possible today, the app keeps its own login; terminal `claude` is governed via managed settings. (b) Build inside the SERVER sandbox with a delegated identity, where SSH keys, Docker and push to main do not exist. (c) Accept and record for the PoC phase; require (b) or a governed terminal session from Tier 2 onward.
+**Decision.** (c) now; (b) for any work touching a non-synthetic repository. Rotate the SERVER `.env` passwords before the stack holds anything but demo data. Add "desktop-app sessions bypass the gateway" to the AI Acceptable Use Policy draft and to the vendor assessment of the desktop app.
+**Pros.** Honest record; the register can be shown to an auditor as written by the process it describes. **Cons.** The PoC's own provenance does not meet the PoC's own bar.
+**Applied in.** This entry. Password rotation and the AUP line are open.
+**Status.** open (owner: CISO; needed before Tier 2).
 
 ---
 
