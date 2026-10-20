@@ -130,7 +130,7 @@ async function renderSide(){
     return li('no', `<span class="mono">${r.full_name}</span>`, `quarantined · open: ${(r.open_items||[]).join(', ')||'dual sign-off'}${r.signed_security?' · security signed':''}${r.signed_owner?' · owner signed':''}`);
   });
   const acts = [
-    li('can','See your own requests and decisions','agl events · agl why <event>'),
+    li('can','See your own requests and decisions','agl events · agl why &lt;event&gt;'),
     li(has('security_admin','auditor','dpo','platform_admin')?'can':'no', 'See everyone’s events', has('security_admin','auditor','dpo','platform_admin')?'':'needs security_admin, auditor, dpo or platform_admin'),
     li(has('team_lead','budget_owner')?'can':'no', 'Request a budget top-up', has('team_lead','budget_owner')?'':'needs team_lead or budget_owner'),
     li(has('budget_owner','finance')?'cond':'no', 'Approve a top-up', has('budget_owner','finance')?'never your own request':'needs budget_owner or finance'),
