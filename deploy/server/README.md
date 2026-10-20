@@ -19,21 +19,29 @@ Order of operations (docs/07 §10.5 and §10.7). Steps marked **(you)** need the
 
 Security posture of the result: only 443 (Caddy) and 22 (SSH) are reachable, and only from the Tailscale range; the governance network has no published ports and no route out except the egress proxy; model weights enter through an explicit pull job, not from inside the stack.
 
-## On SERVER, step by step (WSL 2 shell)
+## On SERVER, step by step (as found on 2026-10-20)
+
+SERVER has no Ubuntu distro: the only WSL 2 distro is Docker Desktop's own. The repository therefore lives on the Windows filesystem at `D:\Projects\AI-Gov-Layer`, Git Bash (`C:\Program Files\Git\bin\bash.exe`) runs the shell scripts, and the `.gitattributes` in the repository forces LF line endings so the scripts work inside containers. Bind mounts from `D:\` work through Docker Desktop.
+
+1. **Docker Desktop must be running in your Windows session.** It cannot be started from SSH. Start it from the Start menu and, in Settings → General, tick "Start Docker Desktop when you sign in". In Settings → Resources → WSL integration nothing extra is needed; GPU support is automatic with the WSL 2 backend and current NVIDIA drivers.
+2. `stack\.env` was generated with random passwords and the Tailscale addresses. Add your Anthropic key and switch the external tier on, in an elevated or normal PowerShell:
+
+```powershell
+notepad D:\Projects\AI-Gov-Layer\stack\.env     # set ANTHROPIC_API_KEY=... and AGL_EXTERNAL_BACKEND=anthropic
+```
+
+3. The rest is driven from the Mac over SSH (or from Git Bash on SERVER):
 
 ```bash
-# inside the WSL distro (Ubuntu), in the Linux filesystem, not /mnt/c
-git clone https://github.com/AndDumi1008/AI-Gov-Layer.git ~/AI-Gov-Layer && cd ~/AI-Gov-Layer
-cp stack/.env.example stack/.env
-# edit stack/.env: BIND_IP=<SERVER Tailscale IP>, SERVER_TS_IP=<same>, real passwords,
-#   AGL_EXTERNAL_BACKEND=anthropic, ANTHROPIC_API_KEY=<typed by you>,
-#   AGL_LOCAL_BACKEND_URL=http://ollama:11434, AGL_LOCAL_MODEL=qwen2.5-coder:7b
-make up-server                          # core + model (GPU overlay) + edge (caddy, coredns)
-deploy/server/pull-model.sh             # side-load the weights (one-off container)
-docker build -t agl-sandbox:latest stack/sandbox
-AGL_URL=http://<SERVER Tailscale IP>:4000 ./demo/run-scenarios.sh    # before DNS/TLS
+# from the Mac
+ssh server 'cd /d D:\Projects\AI-Gov-Layer && "C:\Program Files\Git\bin\bash.exe" stack/bootstrap.sh --profile model --profile edge'
+ssh server 'cd /d D:\Projects\AI-Gov-Layer && "C:\Program Files\Git\bin\bash.exe" deploy/server/pull-model.sh'
+ssh server 'cd /d D:\Projects\AI-Gov-Layer && docker build -t agl-sandbox:latest stack/sandbox'
+AGL_URL=http://100.109.138.14:4000 ./demo/run-scenarios.sh       # before DNS/TLS; run on the Mac
 ```
+
+The GPU overlay (`docker-compose.gpu.yml`) is added by `make up-server`; with Git Bash and no `make`, pass it explicitly: `docker compose -f stack/docker-compose.yml -f stack/docker-compose.gpu.yml --profile model --profile edge up -d --build`.
 
 After the Tailscale split-DNS rule and the CA trust on the Mac: `AGL_URL=https://gateway.shortandsweet.home.ro ./demo/run-scenarios.sh` from the Mac.
 
-Docker Desktop on Windows notes: the `gpu` overlay needs "Enable GPU support" in Docker Desktop settings; `make up-server` uses `docker compose -f stack/docker-compose.yml -f stack/docker-compose.gpu.yml`. If the GPU is not available, start without the overlay and the 1.5b model (`AGL_LOCAL_MODEL=qwen2.5-coder:1.5b`) runs on CPU.
+Note on GPUs: SERVER reports a GTX 1070 (8 GB) and a GTX 1050 (2 GB). The compose overlay reserves one GPU; Docker picks the first. If the 1050 is chosen, set `device_ids: ["0"]` (or the 1070's UUID from `nvidia-smi -L`) in `docker-compose.gpu.yml`.
