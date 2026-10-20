@@ -4,7 +4,7 @@ Order of operations (docs/07 §10.5 and §10.7). Steps marked **(you)** need the
 
 | # | Step | Who | File |
 |---|------|-----|------|
-| 1 | Tailscale on both machines, tags `tag:server` / `tag:dev`, ACL applied | you | `tailscale-acl.json` |
+| 1 | Tailscale on both machines; SERVER tagged `tag:server` in the admin console (Machines → … → Edit ACL tags); ACL applied. The Mac stays an untagged user device | you | `tailscale-acl.json` |
 | 2 | Windows OpenSSH Server enabled; your public key in `administrators_authorized_keys`; firewall rules | you | `windows-setup.ps1` (run as Administrator) |
 | 3 | `.wslconfig` with memory for WSL 2 | you | `wslconfig.ini` → `%UserProfile%\.wslconfig`, then `wsl --shutdown` |
 | 4 | Docker Desktop: WSL 2 backend, "Expose daemon" **off**, GPU support on | you | — |
