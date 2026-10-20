@@ -518,6 +518,17 @@ def audit_verify(authorization: str | None = Header(None), simulate_tamper: bool
     i = _ident(authorization); require_role(i, "security_admin", "platform_admin", "auditor", "dpo")
     return audit.chain.verify(simulate_tamper=simulate_tamper)
 
+@app.get("/agl/repos")
+def repos(authorization: str | None = Header(None)):
+    _ident(authorization)
+    return {"repositories": db.all_("""select r.full_name, r.classification, r.ai_exposure, r.ai_sandbox_allowed, t.name as team,
+                                        g.approver_security is not null as signed_security, g.approver_owner is not null as signed_owner,
+                                        array_remove(array[case when not coalesce(g.classification_set,false) then 'classification_set' end,
+                                                           case when not coalesce(g.no_prod_data,false) then 'no_prod_data' end,
+                                                           case when not coalesce(g.no_prod_secrets,false) then 'no_prod_secrets' end,
+                                                           case when not coalesce(g.no_prod_connectivity,false) then 'no_prod_connectivity' end], null) as open_items
+                                 from repository r left join team t on t.id=r.team_id left join repository_ai_gate g on g.repository_id=r.id order by r.full_name""")}
+
 @app.get("/agl/datasets")
 def datasets(authorization: str | None = Header(None)):
     _ident(authorization)

@@ -12,6 +12,16 @@
  --ok:#5ccf84;--ok-bg:#15311f;--warn:#f2b34d;--warn-bg:#3a2a12;--bad:#ff7b72;--bad-bg:#3d1c19;--eu:#8fb3f5;--eu-bg:#1b2a44;color-scheme:dark}}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 -apple-system,"Segoe UI",Helvetica,Arial,sans-serif;height:100vh;display:grid;grid-template-rows:auto 1fr auto}
+.body{display:grid;grid-template-columns:minmax(0,1fr) 340px;min-height:0}
+@media (max-width:900px){.body{grid-template-columns:1fr}aside{border-left:0;border-top:1px solid var(--line);max-height:40vh}}
+aside{border-left:1px solid var(--line);background:var(--surface);overflow:auto;padding:14px 16px;font-size:13px;display:grid;gap:14px;align-content:start}
+aside h2{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 6px}
+aside ul{margin:0;padding-left:0;list-style:none;display:grid;gap:5px}
+aside li{display:grid;grid-template-columns:18px 1fr;gap:6px;align-items:start}
+aside li .i{font-weight:700;text-align:center}
+aside li.can .i{color:var(--ok)} aside li.no .i{color:var(--bad)} aside li.cond .i{color:var(--warn)}
+aside .sub{color:var(--muted);font-size:12px}
+aside .mono{font-family:var(--mono);font-size:11.5px}
 header{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;padding:10px 16px;border-bottom:2px solid var(--fg);background:var(--surface)}
 header h1{font-size:18px;margin:0;letter-spacing:.02em;text-transform:uppercase}
 .who{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-left:auto;font-size:13px}
@@ -19,7 +29,7 @@ header h1{font-size:18px;margin:0;letter-spacing:.02em;text-transform:uppercase}
 .chip{font-family:var(--mono);font-size:11px;padding:2px 7px;border-radius:3px;border:1px solid var(--line)}
 .chip.eu{color:var(--eu);background:var(--eu-bg);border-color:var(--eu)}
 .chip.ok{color:var(--ok);background:var(--ok-bg);border-color:var(--ok)} .chip.warn{color:var(--warn);background:var(--warn-bg);border-color:var(--warn)} .chip.bad{color:var(--bad);background:var(--bad-bg);border-color:var(--bad)}
-main{overflow:auto;padding:16px;max-width:980px;width:100%;margin:0 auto;display:grid;gap:12px;align-content:start}
+main{overflow:auto;padding:16px;width:100%;display:grid;gap:12px;align-content:start;min-width:0}
 .msg{border:1px solid var(--line);background:var(--surface);border-radius:4px;padding:10px 12px;display:grid;gap:6px}
 .msg.user{border-left:4px solid var(--fg)} .msg.ai{border-left:4px solid var(--accent)} .msg.block{border-left:4px solid var(--bad);background:var(--bad-bg)}
 .msg .meta{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:12px;color:var(--muted)}
@@ -48,9 +58,12 @@ label{font-size:12px;color:var(--muted);display:grid;gap:3px}
     </form>
   </div>
 </header>
+<div class="body">
 <main id="log">
   <div class="msg ai"><pre>Connect as a seeded user, pick a classification and a model, and ask. Each answer shows the gateway's decision, the model and region that served it, the cost, and a link to the audit event.</pre></div>
 </main>
+<aside id="side"><h2>Runbook</h2><p class="sub">Connect to see what this identity can and cannot do. The list is computed from the identity's roles, team budget, training, the model registry and the repository gates, the same inputs the policy uses.</p></aside>
+</div>
 <footer>
   <div class="row">
     <label>Classification<select id="cls"><option>PUBLIC</option><option selected>INTERNAL</option><option>CONFIDENTIAL</option><option>RESTRICTED</option></select></label>
@@ -88,7 +101,48 @@ async function whoami(){
   $('logout').onclick = () => { token=null; me=null; try{localStorage.removeItem('agl_token')}catch{}; location.reload(); };
   $('budget').textContent = `budget · team ${pct(t)} · org ${pct(o)}`;
   $('prompt').disabled = false; $('send').disabled = false; $('prompt').focus();
+  renderSide().catch(()=>{});
   return true;
+}
+async function renderSide(){
+  const [mr, rr] = await Promise.all([api('/agl/models'), api('/agl/repos')]);
+  const models = mr.ok ? (await mr.json()).models : []; const repos = rr.ok ? (await rr.json()).repositories : [];
+  const roles = new Set(me.roles||[]); const has = (...r) => r.some(x=>roles.has(x));
+  const b = me.budget||{}; const exhausted = (b.team && b.team.pct>=100) || (b.org && b.org.pct>=100);
+  const li = (k, t, sub='') => `<li class="${k}"><span class="i">${k==='can'?'✓':k==='no'?'✕':'!'}</span><span>${t}${sub?`<div class="sub">${sub}</div>`:''}</span></li>`;
+  const sec = (h, items) => `<section><h2>${h}</h2><ul>${items.join('')}</ul></section>`;
+  const blockers = [];
+  if(!me.training_completed) blockers.push(li('no','Every request is blocked: AI literacy training not completed','TRAINING_REQUIRED'));
+  if(!b.team) blockers.push(li('no','Every request is blocked: no budget envelope for this team','NO_TEAM_BUDGET'));
+  if(exhausted) blockers.push(li('no','Every request is blocked: budget used up','BUDGET_EXHAUSTED · a team lead can request a top-up'));
+  const ask = blockers.length ? blockers : [
+    li('can','Ask with PUBLIC or INTERNAL data', `models: ${models.filter(m=>['approved','restricted'].includes(m.status)||m.active_exception).map(m=>`<span class="mono">${m.alias}</span> (${m.residency.replaceAll('_',' ').toLowerCase()}${m.active_exception?', under exception':''})`).join(' · ')}`),
+    li('cond','Ask with CONFIDENTIAL data', `answered only by the self-hosted tier (<span class="mono">${(models.find(m=>m.residency==='EU_SELF_HOSTED')||{}).alias||'none'}</span>); the external model is never used, the prompt text is never stored`),
+    li('no','Send RESTRICTED data to any model','production data, secrets, special-category personal data'),
+    li('no','Send a credential or key','the request is blocked before it leaves and security is notified'),
+    li('cond','Include personal data (emails, phones, IBANs)','redacted before the model sees it; restored in the answer'),
+    li('no','Reach a model outside the registry or outside the EU','registry, policy and the egress network each refuse it'),
+    li((b.team&&b.team.pct>=80)?'cond':'can', `Spend: team ${b.team?b.team.pct.toFixed(0)+'% of €'+b.team.amount_eur.toFixed(2):'—'} · org ${b.org?b.org.pct.toFixed(0)+'% of €'+b.org.amount_eur.toFixed(2):'—'}`, 'hard stop at 100 %; warning header from 80 %'),
+  ];
+  const repoItems = repos.map(r => {
+    if(r.classification==='RESTRICTED') return li('no', `<span class="mono">${r.full_name}</span>`, 'RESTRICTED: never exposed to AI, no sandbox');
+    if(r.ai_exposure==='allowed') return li('can', `<span class="mono">${r.full_name}</span>`, `${r.classification}, gate satisfied and signed off · sandbox allowed with masked or synthetic data`);
+    return li('no', `<span class="mono">${r.full_name}</span>`, `quarantined · open: ${(r.open_items||[]).join(', ')||'dual sign-off'}${r.signed_security?' · security signed':''}${r.signed_owner?' · owner signed':''}`);
+  });
+  const acts = [
+    li('can','See your own requests and decisions','agl events · agl why <event>'),
+    li(has('security_admin','auditor','dpo','platform_admin')?'can':'no', 'See everyone’s events', has('security_admin','auditor','dpo','platform_admin')?'':'needs security_admin, auditor, dpo or platform_admin'),
+    li(has('team_lead','budget_owner')?'can':'no', 'Request a budget top-up', has('team_lead','budget_owner')?'':'needs team_lead or budget_owner'),
+    li(has('budget_owner','finance')?'cond':'no', 'Approve a top-up', has('budget_owner','finance')?'never your own request':'needs budget_owner or finance'),
+    li(has('security_admin','platform_admin')?'can':'no', 'Set repository gate items (G1–G5)', has('security_admin','platform_admin')?'a false item re-quarantines at once':'needs security_admin or platform_admin'),
+    li(has('security_admin')?'cond':has('team_lead','platform_admin')?'cond':'no', 'Sign off a repository for AI', has('security_admin')?'as security; a second person signs as owner':has('team_lead','platform_admin')?'as owner; security signs separately':'needs security_admin, team_lead or platform_admin'),
+    li(repos.some(r=>r.ai_exposure==='allowed')?'can':'no','Start an agent sandbox for an allowed repository','ephemeral, no credentials, egress to the gateway only; production-derived data cannot be mounted'),
+    li(has('security_admin','platform_admin','auditor','dpo')?'can':'no','Verify the audit chain', has('security_admin','platform_admin','auditor','dpo')?'re-hash every event, compare to WORM anchors':'needs security_admin, platform_admin, auditor or dpo'),
+    li('no','Edit or delete any audit record','nobody can, including administrators'),
+    li('no','Approve your own request, or act alone where two people are required','top-ups, repository sign-off, model approval, exceptions'),
+  ];
+  $('side').innerHTML = `<h2>Runbook for <b>${me.display_name||me.subject}</b></h2><p class="sub">team ${me.team||'—'} · roles ${(me.roles||[]).join(', ')||'none'}</p>`
+    + sec('Asking', ask) + sec('Repositories', repoItems) + sec('Actions', acts);
 }
 $('login').addEventListener('submit', async e => {
   e.preventDefault();
