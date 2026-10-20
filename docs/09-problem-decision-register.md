@@ -63,6 +63,7 @@ IDs are `PD-xx`, chronological.
 | PD-32 | Port 443 on SERVER belongs to Tailscale Serve; Caddy moved to 8443 | applied | 2026-10-20 |
 | PD-33 | Python and Node ignore the macOS keychain; CA file passed explicitly | verified | 2026-10-20 |
 | PD-34 | Firewall and ACL must list the real ports (22, 53, 4000, 8443); the first versions blocked the tailnet | verified | 2026-10-20 |
+| PD-35 | Claude Code through the gateway: env token wins over stored login, except when launched inside the desktop app | verified | 2026-10-20 |
 
 ---
 
@@ -386,6 +387,14 @@ IDs are `PD-xx`, chronological.
 **Problem.** The first firewall script added Block rules that Windows applied to Tailscale peers (they count as "Internet"), and the first ACL allowed only a `tag:dev` source, hiding the server from the untagged Mac; after Caddy moved to 8443 and 4000 was needed for the CLI, both lists had to change again.
 **Decision.** Allow-only firewall rules scoped to `100.64.0.0/10` for 22, 53, 4000, 8443; ACL from `autogroup:member` to `tag:server` on the same ports; `tests` omitted because their source cannot be an autogroup.
 **Status.** verified (ports reachable from the Mac, nothing else).
+
+## PD-35 — Claude Code through the gateway
+
+**Problem.** The first end-to-end test of Claude Code against the gateway failed with "Token rejected": a header capture showed Claude Code sending the desktop app's own OAuth token instead of the gateway JWT given in the environment. The test had been launched from inside a Claude desktop session, whose `CLAUDE_CODE_*` variables make nested runs reuse the host's login.
+**Thought process.** With a scrubbed environment (plain terminal conditions) `ANTHROPIC_AUTH_TOKEN` is sent as the bearer token even though a Keychain login exists, so the managed settings work as designed for a developer's terminal. The gateway also now accepts the JWT from either `Authorization` or `x-api-key`, so the `ANTHROPIC_API_KEY` form works too.
+**Decision.** Managed settings carry `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `NODE_EXTRA_CA_CERTS` and `ANTHROPIC_MODEL=claude-sonnet-4-5` (the gateway maps unknown model names to `code-default`; a real model name avoids Claude Code's catalog warning). Observed on the first call: Claude Code's system prompt includes the user's email, which the gateway redacted (`PII_REDACTED`); cost per Claude Code turn is ~€0.03 at list price because of the large system prompt, which the budget ledger now meters.
+**Pros.** Developers keep Claude Code as is; one settings file routes it. **Cons.** The 8 h dev token must be refreshed until the IdP integration replaces the dev issuer; nested launches inside the desktop app bypass the setting.
+**Status.** verified.
 
 ---
 

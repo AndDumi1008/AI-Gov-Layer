@@ -3,15 +3,25 @@
   "env": {
     "ANTHROPIC_BASE_URL": "https://gateway.shortandsweet.home.ro:8443",
     "ANTHROPIC_AUTH_TOKEN": "<JWT>",
-    "ANTHROPIC_MODEL": "code-default",
+    "ANTHROPIC_MODEL": "claude-sonnet-4-5",
     "NODE_EXTRA_CA_CERTS": "/Users/<you>/Projects/AI-Gov-Layer/evidence/agl-root.crt",
     "DISABLE_TELEMETRY": "1"
   },
   "permissions": {
     "deny": [
-      "Bash(kill *)", "Bash(pkill *)", "Bash(sudo *)", "Bash(curl *)", "Bash(wget *)",
-      "Bash(kubectl *)", "Bash(aws *)", "Bash(gcloud *)", "Bash(az *)", "Bash(docker *)",
-      "Bash(git push * main)", "Bash(git push * master)", "Bash(gh pr merge *)"
+      "Bash(kill *)",
+      "Bash(pkill *)",
+      "Bash(sudo *)",
+      "Bash(curl *)",
+      "Bash(wget *)",
+      "Bash(kubectl *)",
+      "Bash(aws *)",
+      "Bash(gcloud *)",
+      "Bash(az *)",
+      "Bash(docker *)",
+      "Bash(git push * main)",
+      "Bash(git push * master)",
+      "Bash(gh pr merge *)"
     ]
   }
 }
