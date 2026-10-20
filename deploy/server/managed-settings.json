@@ -1,7 +1,7 @@
 {
   "_comment": "Claude Code managed settings for the PoC. Mac: /Library/Application Support/ClaudeCode/managed-settings.json (sudo). Replace <JWT> with the output of `agl login --as dana` (cat ~/.agl/token). User/project settings cannot override these.",
   "env": {
-    "ANTHROPIC_BASE_URL": "https://gateway.shortandsweet.home.ro",
+    "ANTHROPIC_BASE_URL": "https://gateway.shortandsweet.home.ro:8443",
     "ANTHROPIC_AUTH_TOKEN": "<JWT>",
     "ANTHROPIC_MODEL": "code-default",
     "DISABLE_TELEMETRY": "1"

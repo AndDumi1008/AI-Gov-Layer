@@ -127,7 +127,7 @@ services:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
     ports:
-      - "${BIND_IP}:443:443"
+      - "${BIND_IP}:${AGL_HTTPS_PORT:-443}:443"   # SERVER uses 8443: tailscaled holds 443 for Tailscale Serve
       - "${BIND_IP}:4000:4000"
     networks: [edge-net, agl-net]
     depends_on: [gateway]
