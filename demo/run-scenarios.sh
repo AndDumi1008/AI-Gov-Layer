@@ -25,8 +25,13 @@ EV1=$(echo "$r" | grep -o '"X-AGL-Event": "[^"]*"' | cut -d'"' -f4)
 
 say "S2  two emails in prompt → redact, model saw placeholders"
 r=$(as dana ask "Email ana.popescu@example.ro and jonas.weber@example.de about the parcel." -c INTERNAL); echo "$r" >> "$LOG"; check S2a 'PII_REDACTED' "$r"
-seen=$(docker exec agl-mock-model-1 python3 -c "import urllib.request,json;print(json.load(urllib.request.urlopen('http://localhost:8000/debug/last'))['prompt'])" 2>/dev/null || echo "n/a")
-echo "model saw: $seen" >> "$LOG"; check S2b '\[EMAIL_1\]' "$seen"
+EXT=$(grep -E '^AGL_EXTERNAL_BACKEND=' stack/.env | cut -d= -f2)
+if [ "$EXT" = "mock" ] && docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^agl-mock-model-1$'; then
+  seen=$(docker exec agl-mock-model-1 python3 -c "import urllib.request,json;print(json.load(urllib.request.urlopen('http://localhost:8000/debug/last'))['prompt'])" 2>/dev/null || echo "n/a")
+  echo "model saw: $seen" >> "$LOG"; check S2b '\[EMAIL_1\]' "$seen"
+else
+  echo "   SKIP S2b (external tier is '$EXT' / mock not local: the model-side view is only inspectable on the mock; the redaction itself is proven by S2a and the response headers)" | tee -a "$LOG"
+fi
 
 say "S3  AWS key in prompt → block SECRET_DETECTED"
 r=$(as dana ask "Why does AKIAABCDEFGHIJKLMNOP fail with 403?" -c INTERNAL); echo "$r" >> "$LOG"; check S3 'SECRET_DETECTED' "$r"
