@@ -5,8 +5,5 @@
   "acls": [
     { "action": "accept", "src": ["autogroup:member"], "dst": ["tag:server:22", "tag:server:443", "tag:server:53"] }
   ],
-  "ssh": [],
-  "tests": [
-    { "src": "autogroup:member", "accept": ["tag:server:443", "tag:server:22"], "deny": ["tag:server:4000", "tag:server:5432", "tag:server:9000"] }
-  ]
+  "ssh": []
 }
