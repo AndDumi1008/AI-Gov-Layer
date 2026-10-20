@@ -26,6 +26,10 @@
 
 Every AI call goes through one EU-hosted gateway that knows the caller (SSO), the team, the approved models (registry with region and contract references), the data classification, what must not be sent (DLP), and how much may be spent (ledger with hard caps). Each call is written once to a hash-chained, WORM-protected audit store that holds no prompt text. AI may suggest code, but humans commit, humans review, humans approve production deploys, and only a GitOps controller writes to production, admitting only signed, provenance-attested artifacts. AI identities have no production permissions and no network path to production, and that is tested every quarter.
 
+## Contributing under Gate 1
+
+Changes reach `main` only through a pull request that passes the seven checks in `.github/workflows/ci.yml`; AI-assisted commits carry a `Co-Authored-By`/`AI-Assisted` trailer, get the `ai-assisted` label automatically and need the checklist in the PR template ticked. See docs/08 §5.1.
+
 ## Run the PoC (Tier 1)
 
 ```
