@@ -14,11 +14,5 @@ opa.{$DOMAIN} {
     tls internal
     reverse_proxy opa:8181
 }
-minio.{$DOMAIN} {
-    tls internal
-    reverse_proxy minio:9001
-}
-anchor.{$DOMAIN} {
-    tls internal
-    reverse_proxy minio-anchor:9001
-}
+# No MinIO web console: current MinIO builds (and the Bitnami legacy image) ship without it.
+# Object Lock is shown with the mc client instead: demo/show-worm.sh (PD-36).

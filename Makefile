@@ -51,3 +51,5 @@ demo-server-reset:  ## logged control-plane reset on SERVER, then the suite and 
 	./demo/run-server.sh --reset
 demo-report:        ## rebuild the HTML report for the latest evidence folder
 	python3 demo/report.py "$$(ls -d evidence/run-* | tail -1)" > "$$(ls -d evidence/run-* | tail -1)/report.html" && echo "$$(ls -d evidence/run-* | tail -1)/report.html"
+demo-worm:          ## show the WORM audit store live on SERVER (mc): retention, versions, refused delete
+	DOCKER_CONTEXT=server ./demo/show-worm.sh

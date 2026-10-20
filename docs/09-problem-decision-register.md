@@ -64,6 +64,7 @@ IDs are `PD-xx`, chronological.
 | PD-33 | Python and Node ignore the macOS keychain; CA file passed explicitly | verified | 2026-10-20 |
 | PD-34 | Firewall and ACL must list the real ports (22, 53, 4000, 8443); the first versions blocked the tailnet | verified | 2026-10-20 |
 | PD-35 | Claude Code through the gateway: env token wins over stored login, except when launched inside the desktop app | verified | 2026-10-20 |
+| PD-36 | No MinIO web console in current builds; Object Lock shown with the mc client | applied | 2026-10-20 |
 
 ---
 
@@ -395,6 +396,13 @@ IDs are `PD-xx`, chronological.
 **Decision.** Managed settings carry `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `NODE_EXTRA_CA_CERTS` and `ANTHROPIC_MODEL=claude-sonnet-4-5` (the gateway maps unknown model names to `code-default`; a real model name avoids Claude Code's catalog warning). Observed on the first call: Claude Code's system prompt includes the user's email, which the gateway redacted (`PII_REDACTED`); cost per Claude Code turn is ~€0.03 at list price because of the large system prompt, which the budget ledger now meters.
 **Pros.** Developers keep Claude Code as is; one settings file routes it. **Cons.** The 8 h dev token must be refreshed until the IdP integration replaces the dev issuer; nested launches inside the desktop app bypass the setting.
 **Status.** verified.
+
+## PD-36 — No MinIO web console
+
+**Problem.** The runbook pointed at `https://minio.shortandsweet.home.ro:8443` for the Object Lock view; it returned 502. MinIO listens on 9000 only: the embedded console was removed from community builds in 2025 and the Bitnami legacy image follows.
+**Fixes considered.** A third-party S3 browser container (another component to assess); or show the store with the `mc` client.
+**Decision.** `demo/show-worm.sh` (`make demo-worm`): lock configuration, newest segments, retention mode and expiry, versions, a refused delete of all versions, and the anchors in the second store. The Caddy hostnames for the consoles were removed. In production the cloud provider's console or an internal dashboard replaces this.
+**Status.** applied (verified on SERVER).
 
 ---
 

@@ -6,11 +6,11 @@ Audience: the people who decide whether AI can be adopted under the ISMS (CISO, 
 
 | Check | Command / place |
 |-------|-----------------|
-| Docker Desktop running on SERVER | Windows session; `docker --context server ps` from the Mac shows 10 containers |
+| Docker Desktop running on SERVER | Windows session; `docker --context server ps` from the Mac shows 9 running containers (`minio-init` exits after creating the buckets) |
 | Gateway healthy over TLS | `curl https://gateway.shortandsweet.home.ro:8443/healthz` → `{"ok":true}` |
 | Fresh token for Claude Code | `agl login --as dana`, copy `evidence/managed-settings.json` to the system path (sudo) |
 | Reset the control plane (logged) | `make demo-server-reset` the evening before, or `agl demo-reset` as sven/ines live, to show that the reset is itself an audit event |
-| Open two browser tabs | MinIO console `https://minio.shortandsweet.home.ro:8443` (Object Lock), and the two interactive pages (Parcel Data Journey, Code to Production Journey) |
+| Open browser tabs | The two interactive pages (Parcel Data Journey, Code to Production Journey). There is no MinIO web console in this build; Object Lock is shown live with `make demo-worm` |
 | Terminal font large | the audience reads the headers `X-AGL-Decision`, `X-AGL-Model`, `X-AGL-Rerouted` |
 
 Set once in the demo terminal:
@@ -116,7 +116,10 @@ AGL_TOKEN_FILE=/tmp/t-mira agl topup approve <id>          # refused: approver m
 ```bash
 AGL_TOKEN_FILE=/tmp/t-ines agl audit flush; AGL_TOKEN_FILE=/tmp/t-ines agl audit anchor
 ```
-MinIO console tab: the segment objects, retention COMPLIANCE. Attempt a delete of a locked version (S11 command in `demo/run-scenarios.sh`): "WORM protected". DBA attempt (S10): `delete from audit_event` → "append-only".
+```bash
+make demo-worm        # bucket lock config, newest segments, retention COMPLIANCE, versions, delete attempt → "WORM protected", anchors in the second store
+```
+DBA attempt (S10): `docker --context server exec agl-postgres-1 psql -U postgres -c "delete from audit_event where seq=1"` → "append-only".
 
 ```bash
 AGL_TOKEN_FILE=/tmp/t-ines agl audit verify                     # pass, N events, anchors match
