@@ -14,6 +14,12 @@ chat.{$DOMAIN} {
     tls internal
     reverse_proxy gateway:8000
 }
+# parcel-app backends (PostgreSQL + PostgREST per environment, docs/07 §10.6). The parcel stack's
+# connect-caddy.sh joins this container to the stack network, so the upstream resolves over Docker DNS.
+preview-api.{$DOMAIN} {
+    tls internal
+    reverse_proxy parcel-preview-api-1:3000
+}
 opa.{$DOMAIN} {
     tls internal
     reverse_proxy opa:8181

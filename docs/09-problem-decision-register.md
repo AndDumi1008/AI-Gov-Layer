@@ -68,6 +68,7 @@ IDs are `PD-xx`, chronological.
 | PD-37 | Top-ups counted as negative consumption produced negative utilisation; now they enlarge the envelope | verified | 2026-10-20 |
 | PD-38 | The PoC was built by an ungoverned agent session with full operator privileges | open | 2026-10-20 |
 | PD-39 | Gate 1 turned on for this repository first; one human account limits what can be required | applied | 2026-10-20 |
+| PD-40 | parcel-app backend: PostgreSQL + PostgREST (Supabase core) per environment instead of the full self-host bundle | applied | 2026-10-20 |
 
 ---
 
@@ -430,6 +431,16 @@ IDs are `PD-xx`, chronological.
 **Decision.** Gate 1 on this repository now: `ci.yml`, PR template, CODEOWNERS, `main` ruleset with required status checks, pull requests only, no bypass actors. The first PR through it passed and was merged by a human. Limits accepted for now: required approvals = 0 and no signature requirement, because there is a single human account and an unsigned history; a required review would block every change. When the second account exists: approvals = 1, code-owner review, signed commits, merge queue, and the `ai-label` check gains the gateway telemetry cross-check (PD-15).
 **Pros.** The pipeline documents are now exercised by a real repository every day; the AI-assisted label and checklist apply to the project's own work. **Cons.** The human-review gate is not yet enforceable here; the merge-queue signature design is unexercised until an application repository exists.
 **Applied in.** `.github/` in this repository; docs/08 §5.1; README.
+**Status.** applied.
+
+## PD-40 — parcel-app backend: Supabase's core rather than the full bundle
+
+**Problem.** §10.6 planned three Supabase self-host stacks on SERVER. The official bundle is twelve services per environment (Kong, GoTrue, PostgREST, Realtime, Storage, Studio, meta, analytics, vector, pooler, functions, Postgres) and its download into this session was declined; for the proofs we need only the data API with row-level security.
+**Fixes considered.** Full bundle per environment; Supabase cloud in an EU region (loses "production on our hardware"); PostgreSQL + PostgREST per environment with a JWT-minting stand-in for Auth.
+**Decision.** PostgreSQL 16 + PostgREST per environment. Migrations are Supabase-format; the RLS helpers read `request.jwt.claims` exactly as under Supabase; JWTs carry `role`, `sub`, `app_metadata.role`. `tests/api_test.sh` proves the role views through HTTP (11 checks). Full Supabase stays a later configuration change.
+**Pros.** Two containers instead of twelve; every control is visible; nothing downloaded that was not reviewed. **Cons.** No Auth, Storage or Studio in the PoC; the frontend will mint sessions through the stand-in until Auth is added.
+**Found on the way.** The masking script cut the customer account link (fixed: `actor_id` kept); the customer tracking view needed a column-level grant on `stop`, which the SQL test had hidden because `count(*)` let the planner prune the subquery (fixed, test extended); PostgREST answers 403 for a role without a grant and 401 only without a token.
+**Applied in.** `parcel-app` PR 1; this repository: Caddy route `preview-api.<domain>` and docs/07 §10.6.
 **Status.** applied.
 
 ---

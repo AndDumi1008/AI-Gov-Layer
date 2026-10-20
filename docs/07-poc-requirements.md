@@ -451,7 +451,7 @@ Decided 2026-10-19 (register PD-19). The PoC governs a real application: the par
 
 ### Environments on SERVER
 
-Three Supabase stacks from the official self-hosting Compose files, one Compose project each, on separate networks. Caddy routes by hostname.
+Three backend stacks, one Compose project each, on separate networks; Caddy joins each network and routes by hostname. **Revised 2026-10-20 (PD-40):** each stack is PostgreSQL 16 + PostgREST, the data API at Supabase's core, instead of the twelve-service Supabase self-host bundle. The migrations stay in Supabase format and the JWT claims match Supabase Auth, so a full Supabase stack (self-hosted or cloud EU region) is a configuration change later. Definition in `parcel-app/deploy/preview/`.
 
 | Env | Hostname (API) | Network | Data | Reachable from |
 |-----|----------------|---------|------|----------------|
