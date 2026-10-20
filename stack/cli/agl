@@ -67,6 +67,7 @@ def main():
     n = ss.add_parser("new"); n.add_argument("repo"); n.add_argument("--dataset"); n.add_argument("--tool", default="claude-code"); n.add_argument("--run", help="run one command in the sandbox and exit"); n.add_argument("--no-docker", action="store_true", help="only mint the sandbox identity")
     s = sub.add_parser("audit"); au = s.add_subparsers(dest="sub", required=True)
     au.add_parser("flush"); au.add_parser("anchor"); v = au.add_parser("verify"); v.add_argument("--simulate-tamper", action="store_true")
+    sub.add_parser("demo-reset", help="PoC: reset control-plane demo state (logged; audit chain untouched)")
     args = p.parse_args()
 
     if args.cmd == "login":
@@ -116,6 +117,7 @@ def main():
         rc = subprocess.call(cmd)
         call("POST", f"/agl/sandbox/{b['sandbox_id']}/destroyed", {})
         sys.exit(rc)
+    if args.cmd == "demo-reset": out(*call("POST", "/agl/admin/demo-reset", {})[::2])
     if args.cmd == "audit":
         if args.sub == "flush": out(*call("POST", "/agl/audit/flush", {})[::2])
         if args.sub == "anchor": out(*call("POST", "/agl/audit/anchor", {})[::2])

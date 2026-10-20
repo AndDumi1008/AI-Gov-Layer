@@ -43,3 +43,11 @@ demo:               ## run scenarios S1–S26 (Tier 1 subset) and write evidence
 up-server:
 	$(COMPOSE) -f stack/docker-compose.gpu.yml --profile model --profile edge up -d --build
 	docker exec agl-ollama-1 ollama pull $$(grep -E '^AGL_LOCAL_MODEL=' stack/.env | cut -d= -f2)
+
+# Demo against SERVER from the Mac (see demo/DEMO.md)
+demo-server:        ## run the suite against SERVER and build the evidence report
+	./demo/run-server.sh
+demo-server-reset:  ## logged control-plane reset on SERVER, then the suite and report
+	./demo/run-server.sh --reset
+demo-report:        ## rebuild the HTML report for the latest evidence folder
+	python3 demo/report.py "$$(ls -d evidence/run-* | tail -1)" > "$$(ls -d evidence/run-* | tail -1)/report.html" && echo "$$(ls -d evidence/run-* | tail -1)/report.html"

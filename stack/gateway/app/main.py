@@ -462,6 +462,26 @@ def sandbox_destroyed(sandbox_id: str, authorization: str | None = Header(None))
     ev = audit.chain.append("sandbox_destroyed", {"sandbox_id": sandbox_id, "by": i["subject"]}, actor_identity_id=i["id"], outcome="destroyed")
     return {"event_id": ev["event_id"]}
 
+# ---------- demo reset (PoC only: available while the dev issuer is on)
+@app.post("/agl/admin/demo-reset")
+def demo_reset(authorization: str | None = Header(None)):
+    """Return the CONTROL PLANE to the seeded demo state: budgets, top-ups, app-x gate, sandboxes.
+    The audit chain is untouched by design; the reset itself is appended to it."""
+    if not config.DEV_ISSUER:
+        raise HTTPException(404)
+    i = _ident(authorization); require_role(i, "platform_admin", "security_admin")
+    db.run("delete from budget_ledger")
+    db.run("delete from topup_request")
+    db.run("update delegated_identity set revoked_at = now() where revoked_at is null")
+    db.run("""update repository_ai_gate set no_prod_data=false, dpia_or_risk_ref=null, approver_security=null, approver_owner=null, approved_at=null, updated_at=now()
+              where repository_id = (select id from repository where full_name='shortandsweet/app-x')""")
+    db.run("update repository set ai_exposure='quarantined' where full_name='shortandsweet/app-x'")
+    db.run("update exception set ends_at = now() + interval '72 hours' where type='model_enable' and status='approved'")
+    ev = audit.chain.append("admin_action", {"action": "demo_reset", "by": i["subject"],
+                            "scope": ["budget_ledger", "topup_request", "delegated_identity", "repository_ai_gate:app-x", "exception:model_enable"],
+                            "note": "control plane reset to seed state; audit chain not modified"}, actor_identity_id=i["id"], outcome="reset")
+    return {"reset": True, "event_id": ev["event_id"], "audit_events_total": db.one("select count(*) as n from audit_event")["n"]}
+
 # ---------- audit operations
 @app.post("/agl/audit/flush")
 def audit_flush(authorization: str | None = Header(None)):
