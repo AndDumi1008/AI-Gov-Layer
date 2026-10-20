@@ -115,7 +115,8 @@ try:
 except Exception as e: print('REFUSED',type(e).__name__,str(e)[:120])" 2>&1); echo "$r" >> "$LOG"; check S25 'REFUSED\|HTTP 403' "$r"
 
 say "S26 policy replay: 1000 synthetic decisions, count any non-EU route"
-r=$(docker run --rm -v "$PWD/stack/policy:/policy:ro" openpolicyagent/opa:1.4.2 test /policy 2>&1 | tail -1); echo "$r" >> "$LOG"; check S26 'PASS' "$r"
+# static policy test on the engine in use; the bind mount must be a path on THAT host (SERVER run: AGL_POLICY_PATH=D:/Projects/AI-Gov-Layer/stack/policy)
+r=$(docker run --rm -v "${AGL_POLICY_PATH:-$PWD/stack/policy}:/policy:ro" openpolicyagent/opa:1.4.2-static test /policy 2>&1 | tail -1); echo "$r" >> "$LOG"; check S26 'PASS' "$r"
 
 echo -e "\n== $pass passed, $fail failed. Evidence in $EV" | tee -a "$LOG"
 as ines events --limit 5 > "$EV/last-events.json" 2>/dev/null; as ines audit verify > "$EV/chain-verification.json" 2>/dev/null
