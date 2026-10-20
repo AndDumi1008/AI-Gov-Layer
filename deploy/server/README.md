@@ -42,6 +42,15 @@ AGL_URL=http://100.109.138.14:4000 ./demo/run-scenarios.sh       # before DNS/TL
 
 The GPU overlay (`docker-compose.gpu.yml`) is added by `make up-server`; with Git Bash and no `make`, pass it explicitly: `docker compose -f stack/docker-compose.yml -f stack/docker-compose.gpu.yml --profile model --profile edge up -d --build`.
 
-After the Tailscale split-DNS rule and the CA trust on the Mac: `AGL_URL=https://gateway.shortandsweet.home.ro:8443 ./demo/run-scenarios.sh` from the Mac. Port 8443 because `tailscaled` on SERVER holds 443 for Tailscale Serve (another project); set `AGL_HTTPS_PORT=443` in `stack/.env` if that is ever reset.
+After the Tailscale split-DNS rule and the CA trust on the Mac, the suite runs from the Mac against SERVER. The Python CLI and Node (Claude Code) do not use the macOS keychain, so the CA file is passed explicitly; the suite's Docker steps run on SERVER through the `server` context and need SERVER's env and policy paths:
+
+```bash
+scp server:D:/Projects/AI-Gov-Layer/stack/.env /tmp/server.env        # not into the repo
+DOCKER_CONTEXT=server AGL_URL=https://gateway.shortandsweet.home.ro:8443 \
+  AGL_ENV_FILE=/tmp/server.env AGL_CA_FILE=$PWD/evidence/agl-root.crt \
+  AGL_POLICY_PATH=D:/Projects/AI-Gov-Layer/stack/policy ./demo/run-scenarios.sh
+```
+
+Result on 2026-10-20: 27 checks pass, S2b skipped by design (the model-side view is only inspectable on the mock). Port 8443 because `tailscaled` on SERVER holds 443 for Tailscale Serve (another project); set `AGL_HTTPS_PORT=443` in `stack/.env` if that is ever reset.
 
 Note on GPUs: SERVER reports a GTX 1070 (8 GB) and a GTX 1050 (2 GB). The compose overlay reserves one GPU; Docker picks the first. If the 1050 is chosen, set `device_ids: ["0"]` (or the 1070's UUID from `nvidia-smi -L`) in `docker-compose.gpu.yml`.

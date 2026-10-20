@@ -59,6 +59,10 @@ IDs are `PD-xx`, chronological.
 | PD-28 | One anchor per day is wrong: anchors need a cut-off and a day may hold several | verified | 2026-10-19 |
 | PD-29 | The in-stack model server cannot pull weights; weights are side-loaded by an explicit job | verified | 2026-10-19 |
 | PD-30 | Gateway database password was a fixed string in the migration and the example env | verified | 2026-10-20 |
+| PD-31 | Driving Docker on a Windows host from SSH: cmd.exe splitting, credential helper, WSL bash shadowing | verified | 2026-10-20 |
+| PD-32 | Port 443 on SERVER belongs to Tailscale Serve; Caddy moved to 8443 | applied | 2026-10-20 |
+| PD-33 | Python and Node ignore the macOS keychain; CA file passed explicitly | verified | 2026-10-20 |
+| PD-34 | Firewall and ACL must list the real ports (22, 53, 4000, 8443); the first versions blocked the tailnet | verified | 2026-10-20 |
 
 ---
 
@@ -357,6 +361,31 @@ IDs are `PD-xx`, chronological.
 **Pros.** No credential in git; the pipeline's own rule caught it, which is the point of having the rule. **Cons.** First-time setup needs a real value in `.env` before anything starts.
 **Applied in.** `stack/schema/002_poc.sql`, `003_gateway_password.sh`, `stack/.env.example`, `stack/bootstrap.sh`, `gateway/app/config.py`, `.gitleaks.toml`. Verified: fresh stack starts with the environment password; suite passes.
 **Status.** verified.
+
+## PD-31 — Driving Docker on a Windows host from SSH
+
+**Problem.** Three separate traps, found one after another while bringing the stack up on SERVER from the Mac. (a) SSH's remote shell on Windows is `cmd.exe`, which splits a command on `&&` and `|` before Git Bash sees it, so pieces of each command ran in cmd. (b) The Docker CLI calls `docker-credential-desktop.exe` whenever it is on the PATH, and that helper needs the interactive logon session; pulls fail from SSH with "A specified logon session does not exist". (c) `bash` resolves to `C:\Windows\System32\bash.exe`, the WSL launcher, unless Git's directories come first on the PATH.
+**Decision.** `deploy/server/agl-ssh.sh`: the command is base64-encoded and passed inside one double-quoted argument; PATH puts Git first and excludes Docker's `resources/bin`; a `docker` shim in `D:\agl-docker-config\bin` execs `docker.exe` by full path; `DOCKER_CONFIG` points to a plain `{}` config. Public images only, which is all the stack needs.
+**Pros.** Everything is driven from the Mac; no interactive session needed except to start Docker Desktop itself. **Cons.** Docker Desktop still has to be started by hand in the Windows session, and the wrapper is Windows-specific.
+**Status.** verified (bootstrap, model side-load, image build and the suite all ran through it).
+
+## PD-32 — Port 443 belongs to Tailscale Serve
+
+**Problem.** Caddy could not bind `100.109.138.14:443`: `tailscaled` holds it for a Tailscale Serve configuration belonging to another project on SERVER.
+**Decision.** Leave the other project alone. Caddy's host port is parametrised (`AGL_HTTPS_PORT`), 8443 on SERVER; the gateway URL is `https://gateway.shortandsweet.home.ro:8443`. 443 can be reclaimed later by setting the variable if Serve is ever reset.
+**Status.** applied.
+
+## PD-33 — Client trust stores
+
+**Problem.** After the Caddy root was trusted in the macOS System keychain, `curl` verified the gateway, but the Python CLI did not (every scenario failed with "no token" because the login call was rejected), and Node-based Claude Code would not either. Python and Node ship their own CA bundles.
+**Decision.** CLI honours `AGL_CA_FILE`; Claude Code gets `NODE_EXTRA_CA_CERTS` in the managed settings; the suite documents both. In production the gateway certificate comes from a CA the organisation already distributes, which removes this step.
+**Status.** verified.
+
+## PD-34 — Firewall and ACL port lists
+
+**Problem.** The first firewall script added Block rules that Windows applied to Tailscale peers (they count as "Internet"), and the first ACL allowed only a `tag:dev` source, hiding the server from the untagged Mac; after Caddy moved to 8443 and 4000 was needed for the CLI, both lists had to change again.
+**Decision.** Allow-only firewall rules scoped to `100.64.0.0/10` for 22, 53, 4000, 8443; ACL from `autogroup:member` to `tag:server` on the same ports; `tests` omitted because their source cannot be an autogroup.
+**Status.** verified (ports reachable from the Mac, nothing else).
 
 ---
 

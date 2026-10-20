@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 """agl — command-line client for the AI Governance Layer PoC.
 Config: AGL_URL (default http://127.0.0.1:4000), token in ~/.agl/token (agl login --as <user>)."""
-import os, sys, json, argparse, subprocess, pathlib, urllib.request, urllib.error
+import os, sys, json, argparse, subprocess, pathlib, ssl, urllib.request, urllib.error
 
 URL = os.environ.get("AGL_URL", "http://127.0.0.1:4000").rstrip("/")
+# Python does not use the macOS/Windows system trust store. For a gateway behind Caddy's internal CA, point
+# AGL_CA_FILE at the root certificate (deploy/server/trust-ca.sh saves it as evidence/agl-root.crt).
+_CA = os.environ.get("AGL_CA_FILE")
+_CTX = ssl.create_default_context(cafile=_CA) if _CA else None
 TOKEN_FILE = pathlib.Path(os.environ.get("AGL_TOKEN_FILE", pathlib.Path.home() / ".agl" / "token"))
 
 def token():
@@ -23,7 +27,7 @@ def call(method, path, body=None, auth=True, headers=None, raw=False):
     for k, v in (headers or {}).items():
         req.add_header(k, v)
     try:
-        with urllib.request.urlopen(req, timeout=300) as r:
+        with urllib.request.urlopen(req, timeout=300, context=_CTX) as r:
             txt = r.read().decode()
             return (r.status, dict(r.headers), txt if raw else (json.loads(txt) if txt else {}))
     except urllib.error.HTTPError as e:

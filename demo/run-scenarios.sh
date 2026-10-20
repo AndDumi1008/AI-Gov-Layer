@@ -4,11 +4,12 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 export AGL_URL="${AGL_URL:-http://127.0.0.1:4000}"
+ENV_FILE="${AGL_ENV_FILE:-stack/.env}"     # SERVER runs (also set AGL_CA_FILE=evidence/agl-root.crt for the Python CLI): point at a copy of SERVER's stack/.env; set DOCKER_CONTEXT=server too
 AGL="python3 stack/cli/agl"
 EV=evidence/run-$(date -u +%Y%m%dT%H%M%SZ); mkdir -p "$EV"
 LOG="$EV/scenarios.log"; : > "$LOG"
 pass=0; fail=0
-BIND_IP=$(grep -E '^BIND_IP=' stack/.env | cut -d= -f2); BIND_IP=${BIND_IP:-127.0.0.1}
+BIND_IP=$(grep -E '^BIND_IP=' "$ENV_FILE" | cut -d= -f2); BIND_IP=${BIND_IP:-127.0.0.1}
 PSQL="docker compose -f stack/docker-compose.yml exec -T postgres psql -U postgres"
 
 say(){ echo -e "\n== $*" | tee -a "$LOG"; }
@@ -25,7 +26,7 @@ EV1=$(echo "$r" | grep -o '"X-AGL-Event": "[^"]*"' | cut -d'"' -f4)
 
 say "S2  two emails in prompt → redact, model saw placeholders"
 r=$(as dana ask "Email ana.popescu@example.ro and jonas.weber@example.de about the parcel." -c INTERNAL); echo "$r" >> "$LOG"; check S2a 'PII_REDACTED' "$r"
-EXT=$(grep -E '^AGL_EXTERNAL_BACKEND=' stack/.env | cut -d= -f2)
+EXT=$(grep -E '^AGL_EXTERNAL_BACKEND=' "$ENV_FILE" | cut -d= -f2)
 if [ "$EXT" = "mock" ] && docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^agl-mock-model-1$'; then
   seen=$(docker exec agl-mock-model-1 python3 -c "import urllib.request,json;print(json.load(urllib.request.urlopen('http://localhost:8000/debug/last'))['prompt'])" 2>/dev/null || echo "n/a")
   echo "model saw: $seen" >> "$LOG"; check S2b '\[EMAIL_1\]' "$seen"
@@ -68,7 +69,7 @@ r=$($PSQL -c "update audit_event set outcome='allow' where seq = 1;" 2>&1); echo
 say "S11 flush + anchor, then try to delete a locked object in MinIO → refused by Object Lock"
 r=$(as ines audit flush); echo "$r" >> "$LOG"; r=$(as ines audit anchor); echo "$r" >> "$LOG"
 MCRUN="docker run --rm --network agl_agl-net --entrypoint sh bitnamilegacy/minio-client@sha256:00dcc4e58ada0df45bb7d9ee435af98295f96c27c3c68292ce78ec700a87b511 -c"
-MCALIAS="mc alias set a http://minio:9000 $(grep -E '^MINIO_ROOT_USER=' stack/.env|cut -d= -f2) $(grep -E '^MINIO_ROOT_PASSWORD=' stack/.env|cut -d= -f2) >/dev/null"
+MCALIAS="mc alias set a http://minio:9000 $(grep -E '^MINIO_ROOT_USER=' "$ENV_FILE"|cut -d= -f2) $(grep -E '^MINIO_ROOT_PASSWORD=' "$ENV_FILE"|cut -d= -f2) >/dev/null"
 OBJ=$($MCRUN "$MCALIAS && mc ls --recursive a/agl-audit/segments | awk '{print \$NF}' | head -1" 2>/dev/null)
 r=$($MCRUN "$MCALIAS && echo 'plain rm (adds a delete marker only; data stays, verifier reads versions):' && mc rm a/agl-audit/segments/$OBJ 2>&1; echo 'rm of the locked versions:' && mc rm --versions --force a/agl-audit/segments/$OBJ 2>&1; echo 'retention:' && mc retention info a/agl-audit/segments/$OBJ 2>&1 | grep Mode; echo 'real versions still present:' && mc ls --versions a/agl-audit/segments/$OBJ | grep -vc DEL" 2>&1); echo "$r" >> "$LOG"
 check S11 'WORM protected' "$r"

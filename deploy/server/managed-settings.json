@@ -4,6 +4,7 @@
     "ANTHROPIC_BASE_URL": "https://gateway.shortandsweet.home.ro:8443",
     "ANTHROPIC_AUTH_TOKEN": "<JWT>",
     "ANTHROPIC_MODEL": "code-default",
+    "NODE_EXTRA_CA_CERTS": "/Users/<you>/Projects/AI-Gov-Layer/evidence/agl-root.crt",
     "DISABLE_TELEMETRY": "1"
   },
   "permissions": {
