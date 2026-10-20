@@ -49,5 +49,6 @@ grant usage on schema public to agl_gateway;
 grant select on all tables in schema public to agl_gateway;
 grant insert on budget_ledger, topup_request, audit_event, audit_segment, audit_anchor, chain_verification, delegated_identity, identity, exception, repository_ai_gate to agl_gateway;
 grant update on topup_request, exception, repository, repository_ai_gate, identity, delegated_identity to agl_gateway;
+grant delete on budget_ledger, topup_request to agl_gateway;   -- control-plane records, mutable by design (demo reset); audit tables stay append-only
 grant usage, select on all sequences in schema public to agl_gateway;
 revoke update, delete, truncate on audit_event, audit_segment, audit_anchor from agl_gateway;
