@@ -420,8 +420,8 @@ IDs are `PD-xx`, chronological.
 **Fixes considered.** (a) Route desktop-app sessions through the gateway: not possible today, the app keeps its own login; terminal `claude` is governed via managed settings. (b) Build inside the SERVER sandbox with a delegated identity, where SSH keys, Docker and push to main do not exist. (c) Accept and record for the PoC phase; require (b) or a governed terminal session from Tier 2 onward.
 **Decision.** (c) now; (b) for any work touching a non-synthetic repository. Rotate the SERVER `.env` passwords before the stack holds anything but demo data. Add "desktop-app sessions bypass the gateway" to the AI Acceptable Use Policy draft and to the vendor assessment of the desktop app.
 **Pros.** Honest record; the register can be shown to an auditor as written by the process it describes. **Cons.** The PoC's own provenance does not meet the PoC's own bar.
-**Applied in.** This entry. Password rotation and the AUP line are open.
-**Status.** open (owner: CISO; needed before Tier 2).
+**Applied in.** This entry; the AUP line is in docs/10 §4 (draft). Password rotation stays open until the stack holds anything but demo data.
+**Status.** open (owner: CISO; rotation before real data).
 
 ## PD-39 — This repository governs its own changes first
 

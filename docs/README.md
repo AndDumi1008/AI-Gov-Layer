@@ -16,6 +16,7 @@
 | 06 | [Implementation Plan](06-implementation-plan.md) | Phases 0–5, deliverables, acceptance, RACI, risks, cost envelope, definition of done |
 | 07 | [PoC Requirements](07-poc-requirements.md) | Prerequisites, functional requirements P-01..P-17, demo scenarios S1..S18, stand-ins, deliverables |
 | 08 | [Delivery Pipeline](08-delivery-pipeline.md) | Local AI-assisted code → PR gates on the merge commit → signed merge candidate with preview → human review → human release approval → GitOps. Example files in [`pipeline/`](../pipeline/) |
+| 10 | [AI Acceptable Use Policy](10-ai-acceptable-use-policy.md) | Draft ISMS policy: permitted and forbidden use, roles, exceptions; includes the desktop-app line from PD-38 |
 | 09 | [Problem & Decision Register](09-problem-decision-register.md) | Every problem found and decision taken: problem, fixes considered, thought process, decision, pros and cons, status |
 | — | [Decision Log](decision-log.md) | D-01..D-10 with context and consequences |
 | — | [Glossary](glossary.md) | Terms |
