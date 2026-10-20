@@ -34,6 +34,8 @@ main{overflow:auto;padding:16px;width:100%;display:grid;gap:12px;align-content:s
 .msg.user{border-left:4px solid var(--fg)} .msg.ai{border-left:4px solid var(--accent)} .msg.block{border-left:4px solid var(--bad);background:var(--bad-bg)}
 .msg .meta{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:12px;color:var(--muted)}
 .msg pre{margin:0;white-space:pre-wrap;word-break:break-word;font:inherit}
+.msg .md h1,.msg .md h2,.msg .md h3{font-size:15px;margin:6px 0 2px} .msg .md ul,.msg .md ol{margin:2px 0 4px 18px;padding:0} .msg .md p{margin:4px 0} .msg .md code{font-family:var(--mono);font-size:12.5px;background:var(--bg);padding:0 4px;border-radius:3px} .msg .md pre{font-family:var(--mono);font-size:12.5px;background:var(--bg);padding:8px;border-radius:3px;overflow:auto}
+.msg table{border-collapse:collapse;font-size:12.5px;width:100%} .msg th,.msg td{text-align:left;padding:4px 8px;border-bottom:1px solid var(--line);vertical-align:top} .msg th{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em} .msg td.mono,.msg .mono{font-family:var(--mono);font-size:11.5px;word-break:break-all}
 .msg .ev{font-family:var(--mono);font-size:11px;color:var(--muted);word-break:break-all}
 .msg .ev a{color:var(--accent)}
 footer{border-top:1px solid var(--line);background:var(--surface);padding:10px 16px;display:grid;gap:8px}
@@ -60,7 +62,9 @@ label{font-size:12px;color:var(--muted);display:grid;gap:3px}
 </header>
 <div class="body">
 <main id="log">
-  <div class="msg ai"><pre>Connect as a seeded user, pick a classification and a model, and ask. Each answer shows the gateway's decision, the model and region that served it, the cost, and a link to the audit event.</pre></div>
+  <div class="msg ai"><pre>Connect as a seeded user, pick a classification and a model, and ask. Each answer shows the gateway's decision, the model and region that served it, the cost, and a link to the audit event.
+
+The model has no access to the gateway's data: it cannot list your events or budgets. Ask the gateway directly with slash commands: /events, /why &lt;event id&gt;, /models, /repos, /budget, /whoami, /help.</pre></div>
 </main>
 <aside id="side"><h2>Runbook</h2><p class="sub">Connect to see what this identity can and cannot do. The list is computed from the identity's roles, team budget, training, the model registry and the repository gates, the same inputs the policy uses.</p></aside>
 </div>
@@ -72,7 +76,7 @@ label{font-size:12px;color:var(--muted);display:grid;gap:3px}
     <span class="hint" id="budget"></span>
   </div>
   <div class="row">
-    <textarea id="prompt" placeholder="Ask something… try an email address, an AWS key, or switch to CONFIDENTIAL" disabled></textarea>
+    <textarea id="prompt" placeholder="Ask the model… or ask the gateway: /events, /why <id>, /models, /repos, /budget" disabled></textarea>
     <button class="primary" id="send" disabled>Send</button>
   </div>
 </footer>
@@ -150,14 +154,67 @@ $('login').addEventListener('submit', async e => {
   if(!r.ok){ add('block', 'Login failed: '+(await r.text())); return; }
   token = (await r.json()).token; try{localStorage.setItem('agl_token', token)}catch{}; whoami();
 });
-function add(kind, text, meta='', ev=''){
+const esc = t => String(t).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function md(t){  // minimal, escape-first markdown: fences, headings, bold, inline code, lists, paragraphs
+  const parts = esc(t).split(/```[a-z]*\n?/); let out='';
+  parts.forEach((p,i)=>{ if(i%2){ out += `<pre>${p}</pre>`; return; }
+    const lines = p.split('\n'); let html='', list=null;
+    const flush=()=>{ if(list){ html+=`</${list}>`; list=null; } };
+    for(const l of lines){
+      let m;
+      if((m=l.match(/^(#{1,6})\s+(.*)/))){ flush(); html+=`<h${Math.min(m[1].length,3)}>${m[2]}</h${Math.min(m[1].length,3)}>`; }
+      else if((m=l.match(/^\s*[-*]\s+(.*)/))){ if(list!=='ul'){flush(); html+='<ul>'; list='ul';} html+=`<li>${m[1]}</li>`; }
+      else if((m=l.match(/^\s*\d+[.)]\s+(.*)/))){ if(list!=='ol'){flush(); html+='<ol>'; list='ol';} html+=`<li>${m[1]}</li>`; }
+      else if(l.trim()===''){ flush(); }
+      else { flush(); html+=`<p>${l}</p>`; }
+    }
+    flush(); out += html.replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/`([^`]+)`/g,'<code>$1</code>');
+  });
+  return out;
+}
+function add(kind, text, meta='', ev='', asHtml=false){
   const d=document.createElement('div'); d.className='msg '+kind;
-  d.innerHTML = (meta?`<div class="meta">${meta}</div>`:'') + `<pre></pre>` + (ev?`<div class="ev">${ev}</div>`:'');
-  d.querySelector('pre').textContent = text; $('log').appendChild(d); d.scrollIntoView({block:'end'});
+  d.innerHTML = (meta?`<div class="meta">${meta}</div>`:'') + (asHtml?`<div class="md"></div>`:`<pre></pre>`) + (ev?`<div class="ev">${ev}</div>`:'');
+  if(asHtml) d.querySelector('.md').innerHTML = text; else d.querySelector('pre').textContent = text;
+  $('log').appendChild(d); d.scrollIntoView({block:'end'});
+}
+function table(cols, rows){
+  return `<table><tr>${cols.map(c=>`<th>${esc(c.h)}</th>`).join('')}</tr>${rows.map(r=>`<tr>${cols.map(c=>`<td class="${c.mono?'mono':''}">${c.f?c.f(r):esc(r[c.k]??'')}</td>`).join('')}</tr>`).join('')}</table>`;
+}
+const CMDS = {
+  help: async () => `<p>Commands go to the gateway with your token, so you see exactly what your roles allow:</p><ul>
+    <li><code>/events [n] [type]</code> audit events (yours; everyone's for security, audit, DPO, platform roles)</li>
+    <li><code>/why &lt;event id&gt;</code> full event with the policy explanation</li>
+    <li><code>/models</code> registry: status, region, residency, ceiling, exception</li>
+    <li><code>/repos</code> repositories, classification and quarantine gate</li>
+    <li><code>/budget</code> team and org envelopes</li><li><code>/whoami</code> identity, roles, training</li><li><code>/datasets</code> mountable datasets</li></ul>`,
+  whoami: async () => { const j = await (await api('/agl/whoami')).json(); return `<pre>${esc(JSON.stringify(j,null,2))}</pre>`; },
+  budget: async () => { const j = await (await api('/agl/budget')).json();
+    return table([{h:'scope',k:'scope'},{h:'envelope €',f:r=>r.v?r.v.amount_eur.toFixed(2):'—'},{h:'consumed €',f:r=>r.v?r.v.consumed_eur.toFixed(4):'—'},{h:'used',f:r=>r.v?r.v.pct.toFixed(1)+' %':'none'}], Object.entries(j).map(([scope,v])=>({scope,v}))); },
+  models: async () => { const j = await (await api('/agl/models')).json();
+    return table([{h:'alias',k:'alias',mono:true},{h:'status',k:'status'},{h:'provider',k:'provider'},{h:'region',k:'region'},{h:'residency',k:'residency',mono:true},{h:'ceiling',k:'classification_ceiling'},{h:'exception',f:r=>r.active_exception?'active':''}], j.models); },
+  repos: async () => { const j = await (await api('/agl/repos')).json();
+    return table([{h:'repository',k:'full_name',mono:true},{h:'class',k:'classification'},{h:'AI exposure',k:'ai_exposure'},{h:'open gate items',f:r=>esc((r.open_items||[]).join(', '))},{h:'signed',f:r=>[r.signed_security?'security':'',r.signed_owner?'owner':''].filter(Boolean).join(' + ')}], j.repositories); },
+  datasets: async () => { const j = await (await api('/agl/datasets')).json();
+    return table([{h:'dataset',k:'name',mono:true},{h:'origin',k:'origin'},{h:'mountable',f:r=>r.mountable?'yes':'no'},{h:'repository',k:'repository',mono:true}], j.datasets); },
+  events: async (args) => { const n = parseInt(args[0])||20; const type = args[1]?`&type=${encodeURIComponent(args[1])}`:'';
+    const r = await api(`/agl/events?limit=${n}${type}`); const j = await r.json(); if(!r.ok) return `<pre>${esc(JSON.stringify(j,null,2))}</pre>`;
+    return `<p class="sub">${j.events.length} most recent events visible to you</p>` + table([{h:'#',k:'seq'},{h:'time',f:r=>esc(String(r.ts).replace('T',' ').slice(0,19))},{h:'type',k:'type',mono:true},{h:'outcome',k:'outcome'},{h:'reasons',f:r=>esc((r.reasons||[]).join(', '))},{h:'€',f:r=>r.cost_eur!=null?Number(r.cost_eur).toFixed(4):''},{h:'event',f:r=>`<a href="/agl/events/${r.event_id}" target="_blank" rel="noopener" class="mono">${esc(r.event_id.slice(0,8))}…</a>`}], j.events); },
+  why: async (args) => { if(!args[0]) return '<p>usage: /why &lt;event id&gt;</p>'; const r = await api(`/agl/events/${args[0]}`); const j = await r.json();
+    const ex = j.explanations ? Object.entries(j.explanations).map(([k,v])=>`<li><code>${esc(k)}</code> ${esc(v)}</li>`).join('') : '';
+    return (ex?`<ul>${ex}</ul>`:'') + `<pre>${esc(JSON.stringify(j.event||j,null,2))}</pre>`; },
+};
+async function command(q){
+  const [name, ...args] = q.slice(1).trim().split(/\s+/); const fn = CMDS[name.toLowerCase()];
+  add('user', q, `<b>${me.display_name||me.subject}</b> ${chip('', 'gateway command')}`);
+  if(!fn){ add('block', `Unknown command /${name}. Try /help.`); return; }
+  try { add('ai', await fn(args), `${chip('ok','gateway')} ${chip('', 'answered by the gateway, not the model')}`, '', true); }
+  catch(e){ add('block', 'Command failed: '+e); }
 }
 const chip = (cls, t) => `<span class="chip ${cls}">${t}</span>`;
 async function send(){
   const q = $('prompt').value.trim(); if(!q) return;
+  if(q.startsWith('/')){ $('prompt').value=''; await command(q); whoami(); return; }
   const cls=$('cls').value, repo=$('repo').value, model=$('model').value;
   add('user', q, `<b>${me.display_name||me.subject}</b> ${chip('', cls)} ${repo?chip('', repo):''} ${chip('', '→ '+model)}`);
   $('prompt').value=''; $('send').disabled=true;
@@ -179,7 +236,7 @@ async function send(){
     const dec = decision==='allow'?'ok':decision==='redact'?'warn':decision==='reroute'?'eu':'';
     const meta = `${chip(dec, decision)} ${reasons.split(',').filter(Boolean).map(x=>chip(x.includes('WARNING')?'warn':x.includes('REDACT')?'warn':x.includes('REROUTE')?'eu':'', x)).join(' ')}
       ${chip('eu', 'model '+h('x-agl-model')+(h('x-agl-rerouted')?' (rerouted)':''))} ${chip('', '€'+h('x-agl-cost-eur'))} ${h('x-agl-warning')?chip('warn', h('x-agl-warning')):''}`;
-    add('ai', text, meta, evLink);
+    add('ai', md(text), meta, evLink, true);
   }
   $('send').disabled=false; whoami();
 }
