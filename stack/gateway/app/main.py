@@ -476,7 +476,8 @@ def demo_reset(authorization: str | None = Header(None)):
     db.run("""update repository_ai_gate set no_prod_data=false, dpia_or_risk_ref=null, approver_security=null, approver_owner=null, approved_at=null, updated_at=now()
               where repository_id = (select id from repository where full_name='shortandsweet/app-x')""")
     db.run("update repository set ai_exposure='quarantined' where full_name='shortandsweet/app-x'")
-    db.run("update exception set ends_at = now() + interval '72 hours' where type='model_enable' and status='approved'")
+    # re-open the evaluation window from now (the check constraint caps ends_at at starts_at + 72 h)
+    db.run("update exception set starts_at = now(), ends_at = now() + interval '72 hours' where type='model_enable' and status='approved'")
     ev = audit.chain.append("admin_action", {"action": "demo_reset", "by": i["subject"],
                             "scope": ["budget_ledger", "topup_request", "delegated_identity", "repository_ai_gate:app-x", "exception:model_enable"],
                             "note": "control plane reset to seed state; audit chain not modified"}, actor_identity_id=i["id"], outcome="reset")
