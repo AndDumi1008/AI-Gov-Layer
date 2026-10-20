@@ -199,7 +199,7 @@ const CMDS = {
     return table([{h:'dataset',k:'name',mono:true},{h:'origin',k:'origin'},{h:'mountable',f:r=>r.mountable?'yes':'no'},{h:'repository',k:'repository',mono:true}], j.datasets); },
   events: async (args) => { const n = parseInt(args[0])||20; const type = args[1]?`&type=${encodeURIComponent(args[1])}`:'';
     const r = await api(`/agl/events?limit=${n}${type}`); const j = await r.json(); if(!r.ok) return `<pre>${esc(JSON.stringify(j,null,2))}</pre>`;
-    return `<p class="sub">${j.events.length} most recent events visible to you</p>` + table([{h:'#',k:'seq'},{h:'time',f:r=>esc(String(r.ts).replace('T',' ').slice(0,19))},{h:'type',k:'type',mono:true},{h:'outcome',k:'outcome'},{h:'reasons',f:r=>esc((r.reasons||[]).join(', '))},{h:'€',f:r=>r.cost_eur!=null?Number(r.cost_eur).toFixed(4):''},{h:'event',f:r=>`<a href="/agl/events/${r.event_id}" target="_blank" rel="noopener" class="mono">${esc(r.event_id.slice(0,8))}…</a>`}], j.events); },
+    return `<p class="sub">${j.events.length} most recent events visible to you</p>` + table([{h:'#',k:'seq'},{h:'time',f:r=>esc(String(r.ts).replace('T',' ').slice(0,19))},{h:'type',k:'type',mono:true},{h:'outcome',k:'outcome'},{h:'reasons',f:r=>esc((r.reasons||[]).join(', '))},{h:'€',f:r=>r.cost_eur!=null?Number(r.cost_eur).toFixed(4):''},{h:'event',f:r=>`<a href="#" data-why="${esc(r.event_id)}" class="mono">${esc(r.event_id.slice(0,8))}…</a>`}], j.events); },
   why: async (args) => { if(!args[0]) return '<p>usage: /why &lt;event id&gt;</p>'; const r = await api(`/agl/events/${args[0]}`); const j = await r.json();
     const ex = j.explanations ? Object.entries(j.explanations).map(([k,v])=>`<li><code>${esc(k)}</code> ${esc(v)}</li>`).join('') : '';
     return (ex?`<ul>${ex}</ul>`:'') + `<pre>${esc(JSON.stringify(j.event||j,null,2))}</pre>`; },
@@ -224,7 +224,7 @@ async function send(){
   } catch(e){ add('block', 'Gateway unreachable: '+e); $('send').disabled=false; return; }
   const h = n => r.headers.get(n) || '';
   const evId = h('x-agl-event'), decision = h('x-agl-decision'), reasons = h('x-agl-reasons');
-  const evLink = evId ? `event <a href="/agl/events/${evId}" target="_blank" rel="noopener">${evId}</a>` : '';
+  const evLink = evId ? `event <a href="#" data-why="${evId}">${evId}</a> · click to explain` : '';
   const j = await r.json().catch(()=>({}));
   if(!r.ok){
     const err = j.error || j; const extra = [];
@@ -241,6 +241,8 @@ async function send(){
   $('send').disabled=false; whoami();
 }
 $('send').onclick = send;
+// event ids are explained in place (a new tab would carry no token)
+$('log').addEventListener('click', e => { const a = e.target.closest('a[data-why]'); if(!a) return; e.preventDefault(); command('/why '+a.dataset.why); });
 $('prompt').addEventListener('keydown', e => { if(e.key==='Enter' && (e.metaKey||e.ctrlKey)) send(); });
 loadUsers().then(()=> token && whoami());
 })();
