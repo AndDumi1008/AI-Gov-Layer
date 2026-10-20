@@ -48,11 +48,14 @@ class AuthError(Exception):
         self.code, self.msg, self.status = code, msg, status
 
 def identity_from_request(authorization: str | None, x_api_key: str | None = None) -> dict:
-    token = None
+    # Clients may send two credentials (Claude Code adds the user's own Anthropic login as a bearer token even
+    # when ANTHROPIC_API_KEY is set). Use whichever header carries a JWT issued for the gateway.
+    candidates = []
     if authorization and authorization.lower().startswith("bearer "):
-        token = authorization.split(" ", 1)[1].strip()
-    elif x_api_key:
-        token = x_api_key.strip()
+        candidates.append(authorization.split(" ", 1)[1].strip())
+    if x_api_key:
+        candidates.append(x_api_key.strip())
+    token = next((c for c in candidates if c.count(".") == 2), candidates[0] if candidates else None)
     if not token:
         raise AuthError("NO_TOKEN", "Missing bearer token. Use `agl login` (PoC) or your IdP token.")
     try:
