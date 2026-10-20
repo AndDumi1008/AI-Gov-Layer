@@ -1,4 +1,6 @@
-# Overlay for SERVER (Windows + WSL2 + NVIDIA): docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile model up -d
+# Overlay for SERVER (Windows + WSL2 + NVIDIA):
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile model up -d
+# SERVER has two GPUs (GTX 1070 = index 0, GTX 1050 = index 1); pin the 1070.
 services:
   ollama:
     deploy:
@@ -6,5 +8,5 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              count: 1
+              device_ids: ["0"]
               capabilities: [gpu]
