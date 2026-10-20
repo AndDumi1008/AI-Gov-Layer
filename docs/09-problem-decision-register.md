@@ -67,6 +67,7 @@ IDs are `PD-xx`, chronological.
 | PD-36 | No MinIO web console in current builds; Object Lock shown with the mc client | applied | 2026-10-20 |
 | PD-37 | Top-ups counted as negative consumption produced negative utilisation; now they enlarge the envelope | verified | 2026-10-20 |
 | PD-38 | The PoC was built by an ungoverned agent session with full operator privileges | open | 2026-10-20 |
+| PD-39 | Gate 1 turned on for this repository first; one human account limits what can be required | applied | 2026-10-20 |
 
 ---
 
@@ -421,6 +422,15 @@ IDs are `PD-xx`, chronological.
 **Pros.** Honest record; the register can be shown to an auditor as written by the process it describes. **Cons.** The PoC's own provenance does not meet the PoC's own bar.
 **Applied in.** This entry. Password rotation and the AUP line are open.
 **Status.** open (owner: CISO; needed before Tier 2).
+
+## PD-39 — This repository governs its own changes first
+
+**Problem.** Tier 2 was scoped around a separate parcel application, which needs an organisation, a second account, Supabase stacks and a runner on SERVER before anything can be shown. Meanwhile this repository, whose every commit is AI-assisted (PD-38), had no checks at all and was pushed to directly.
+**Fixes considered.** Wait for the full Tier 2 scope; or turn Gate 1 on here with GitHub-hosted runners, since none of this repository's checks need SERVER.
+**Decision.** Gate 1 on this repository now: `ci.yml`, PR template, CODEOWNERS, `main` ruleset with required status checks, pull requests only, no bypass actors. The first PR through it passed and was merged by a human. Limits accepted for now: required approvals = 0 and no signature requirement, because there is a single human account and an unsigned history; a required review would block every change. When the second account exists: approvals = 1, code-owner review, signed commits, merge queue, and the `ai-label` check gains the gateway telemetry cross-check (PD-15).
+**Pros.** The pipeline documents are now exercised by a real repository every day; the AI-assisted label and checklist apply to the project's own work. **Cons.** The human-review gate is not yet enforceable here; the merge-queue signature design is unexercised until an application repository exists.
+**Applied in.** `.github/` in this repository; docs/08 §5.1; README.
+**Status.** applied.
 
 ---
 

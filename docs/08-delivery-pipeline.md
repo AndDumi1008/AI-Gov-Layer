@@ -127,6 +127,14 @@ Allowing local Claude Code shifts enforcement from the sandbox to two places:
 
 What the laptop does **not** give you is a delegated agent identity or a step cap, so two conditions must hold on the machine: no production credentials, and the masked dataset only. Those are enforced by the privileged access system and by the dataset catalog, not by the agent configuration. The sandbox orchestrator from the TRD remains the path for long-running or autonomous agent sessions.
 
+## 5.1 Gate 1 live on this repository (2026-10-20)
+
+This repository runs its own Gate 1 on GitHub-hosted runners: `.github/workflows/ci.yml` with `env-vars`, `secrets` (gitleaks over history), `policy-test` (OPA), `gateway-test` (pytest), `schema` (migrations and seed loaded into PostgreSQL 16, then the append-only, non-EU and quarantine constraints are provoked and must refuse), `workflows-lint` (actionlint over this and the example workflows) and `ai-label`. The ruleset `main — governed merge path` requires all seven through a pull request, with strict status checks, no force pushes and no bypass actors.
+
+Pull request 1 was the first change through it: all checks passed on the merge commit, the `ai-assisted` label was applied from the `Co-Authored-By` trailer, and the author's checklist was verified before merge. A human merged it.
+
+What is deliberately not yet enforced here, and why: required approvals are set to zero because the repository has one human account, so a required review would block every change (PD-39); signed commits are not required because the history so far is unsigned. Both switch on when a second account exists. The PaaS and container release paths are not wired to this repository: it has no deployable application of its own.
+
 ## 6. Example files
 
 Everything in [`pipeline/`](../pipeline/) is stack-agnostic: it calls `make lint`, `make build`, `make test` so each repository supplies its own targets.
