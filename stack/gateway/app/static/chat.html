@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AGL Chat</title>
+<style>
+:root{--bg:#f3f5f6;--surface:#fff;--fg:#17222c;--muted:#5b6b78;--line:#d6dde3;--accent:#0e6f7a;--accent-ink:#fff;
+ --ok:#1f7a3f;--ok-bg:#e6f4ea;--warn:#b26a00;--warn-bg:#fff4e3;--bad:#b3261e;--bad-bg:#fde9e7;--eu:#1c4e9d;--eu-bg:#e7eefb;
+ --mono:ui-monospace,Menlo,Consolas,monospace}
+@media (prefers-color-scheme:dark){:root{--bg:#101619;--surface:#182026;--fg:#e8edf0;--muted:#97a6b2;--line:#2b3740;--accent:#3fb3bf;--accent-ink:#071114;
+ --ok:#5ccf84;--ok-bg:#15311f;--warn:#f2b34d;--warn-bg:#3a2a12;--bad:#ff7b72;--bad-bg:#3d1c19;--eu:#8fb3f5;--eu-bg:#1b2a44;color-scheme:dark}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 -apple-system,"Segoe UI",Helvetica,Arial,sans-serif;height:100vh;display:grid;grid-template-rows:auto 1fr auto}
+header{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;padding:10px 16px;border-bottom:2px solid var(--fg);background:var(--surface)}
+header h1{font-size:18px;margin:0;letter-spacing:.02em;text-transform:uppercase}
+.who{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-left:auto;font-size:13px}
+.who b{font-weight:600}
+.chip{font-family:var(--mono);font-size:11px;padding:2px 7px;border-radius:3px;border:1px solid var(--line)}
+.chip.eu{color:var(--eu);background:var(--eu-bg);border-color:var(--eu)}
+.chip.ok{color:var(--ok);background:var(--ok-bg);border-color:var(--ok)} .chip.warn{color:var(--warn);background:var(--warn-bg);border-color:var(--warn)} .chip.bad{color:var(--bad);background:var(--bad-bg);border-color:var(--bad)}
+main{overflow:auto;padding:16px;max-width:980px;width:100%;margin:0 auto;display:grid;gap:12px;align-content:start}
+.msg{border:1px solid var(--line);background:var(--surface);border-radius:4px;padding:10px 12px;display:grid;gap:6px}
+.msg.user{border-left:4px solid var(--fg)} .msg.ai{border-left:4px solid var(--accent)} .msg.block{border-left:4px solid var(--bad);background:var(--bad-bg)}
+.msg .meta{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:12px;color:var(--muted)}
+.msg pre{margin:0;white-space:pre-wrap;word-break:break-word;font:inherit}
+.msg .ev{font-family:var(--mono);font-size:11px;color:var(--muted);word-break:break-all}
+.msg .ev a{color:var(--accent)}
+footer{border-top:1px solid var(--line);background:var(--surface);padding:10px 16px;display:grid;gap:8px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;max-width:980px;margin:0 auto;width:100%}
+textarea{flex:1 1 420px;min-height:64px;font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:3px;background:var(--bg);color:var(--fg);resize:vertical}
+select,input,button{font:14px inherit;padding:7px 10px;border:1px solid var(--line);border-radius:3px;background:var(--bg);color:var(--fg)}
+button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);cursor:pointer;font-weight:600}
+button:disabled{opacity:.5}
+label{font-size:12px;color:var(--muted);display:grid;gap:3px}
+#login{display:flex;gap:8px;align-items:center}
+.hint{font-size:12px;color:var(--muted)}
+</style>
+</head>
+<body>
+<header>
+  <h1>AGL Chat</h1>
+  <span class="hint">every message goes through the governance gateway</span>
+  <div class="who" id="who">
+    <form id="login">
+      <label>Connect as (PoC dev issuer)<select id="user"></select></label>
+      <button class="primary" type="submit">Connect</button>
+    </form>
+  </div>
+</header>
+<main id="log">
+  <div class="msg ai"><pre>Connect as a seeded user, pick a classification and a model, and ask. Each answer shows the gateway's decision, the model and region that served it, the cost, and a link to the audit event.</pre></div>
+</main>
+<footer>
+  <div class="row">
+    <label>Classification<select id="cls"><option>PUBLIC</option><option selected>INTERNAL</option><option>CONFIDENTIAL</option><option>RESTRICTED</option></select></label>
+    <label>Repository context<select id="repo"><option value="">none</option><option>shortandsweet/booking-svc</option><option>shortandsweet/app-x</option><option>shortandsweet/payments-db</option></select></label>
+    <label>Model<select id="model"><option>code-default</option><option>code-local</option></select></label>
+    <span class="hint" id="budget"></span>
+  </div>
+  <div class="row">
+    <textarea id="prompt" placeholder="Ask something… try an email address, an AWS key, or switch to CONFIDENTIAL" disabled></textarea>
+    <button class="primary" id="send" disabled>Send</button>
+  </div>
+</footer>
+<script>
+(() => {
+const $ = id => document.getElementById(id);
+let token = null, me = null;
+try { token = localStorage.getItem('agl_token'); } catch {}
+const api = (path, opt={}) => fetch(path, {...opt, headers: {'content-type':'application/json', ...(token?{'authorization':'Bearer '+token}:{}), ...(opt.headers||{})}});
+
+async function loadUsers(){
+  try { const r = await api('/agl/dev/users'); const j = await r.json();
+    $('user').innerHTML = j.users.map(u=>`<option value="${u.subject}">${u.display_name} (${u.subject})</option>`).join('');
+  } catch { $('user').innerHTML = '<option value="dana">dana</option>'; }
+}
+async function whoami(){
+  const r = await api('/agl/whoami'); if(!r.ok){ token=null; try{localStorage.removeItem('agl_token')}catch{}; return false; }
+  me = await r.json();
+  const b = me.budget||{}; const t=b.team, o=b.org;
+  const pct = x => x? `${x.pct.toFixed(0)}% of €${x.amount_eur.toFixed(2)}` : 'none';
+  $('who').innerHTML = `<span>Connected as <b>${me.display_name||me.subject}</b></span>
+    <span class="chip">${me.subject}</span><span class="chip">team ${me.team||'—'}</span>
+    ${(me.roles||[]).map(r=>`<span class="chip">${r}</span>`).join('')}
+    <span class="chip ${me.training_completed?'ok':'bad'}">${me.training_completed?'training ✓':'training missing'}</span>
+    <button id="logout">Disconnect</button>`;
+  $('logout').onclick = () => { token=null; me=null; try{localStorage.removeItem('agl_token')}catch{}; location.reload(); };
+  $('budget').textContent = `budget · team ${pct(t)} · org ${pct(o)}`;
+  $('prompt').disabled = false; $('send').disabled = false; $('prompt').focus();
+  return true;
+}
+$('login').addEventListener('submit', async e => {
+  e.preventDefault();
+  const r = await api('/agl/dev/mint', {method:'POST', body: JSON.stringify({user: $('user').value})});
+  if(!r.ok){ add('block', 'Login failed: '+(await r.text())); return; }
+  token = (await r.json()).token; try{localStorage.setItem('agl_token', token)}catch{}; whoami();
+});
+function add(kind, text, meta='', ev=''){
+  const d=document.createElement('div'); d.className='msg '+kind;
+  d.innerHTML = (meta?`<div class="meta">${meta}</div>`:'') + `<pre></pre>` + (ev?`<div class="ev">${ev}</div>`:'');
+  d.querySelector('pre').textContent = text; $('log').appendChild(d); d.scrollIntoView({block:'end'});
+}
+const chip = (cls, t) => `<span class="chip ${cls}">${t}</span>`;
+async function send(){
+  const q = $('prompt').value.trim(); if(!q) return;
+  const cls=$('cls').value, repo=$('repo').value, model=$('model').value;
+  add('user', q, `<b>${me.display_name||me.subject}</b> ${chip('', cls)} ${repo?chip('', repo):''} ${chip('', '→ '+model)}`);
+  $('prompt').value=''; $('send').disabled=true;
+  const headers = {'x-agl-classification': cls, 'x-agl-client': 'web-chat'}; if(repo) headers['x-agl-repo']=repo;
+  let r; try {
+    r = await api('/v1/chat/completions', {method:'POST', headers, body: JSON.stringify({model, max_tokens: 600, messages:[{role:'user', content:q}]})});
+  } catch(e){ add('block', 'Gateway unreachable: '+e); $('send').disabled=false; return; }
+  const h = n => r.headers.get(n) || '';
+  const evId = h('x-agl-event'), decision = h('x-agl-decision'), reasons = h('x-agl-reasons');
+  const evLink = evId ? `event <a href="/agl/events/${evId}" target="_blank" rel="noopener">${evId}</a>` : '';
+  const j = await r.json().catch(()=>({}));
+  if(!r.ok){
+    const err = j.error || j; const extra = [];
+    if(err.open_gate_items) extra.push('open gate items: '+err.open_gate_items.join(', '));
+    if(err.allowed_models) extra.push('allowed models: '+err.allowed_models.join(', '));
+    add('block', (err.message||JSON.stringify(j)) + (extra.length? '\n'+extra.join('\n'):''), `${chip('bad', decision||'block')} ${reasons.split(',').filter(Boolean).map(x=>chip('bad', x)).join(' ')}`, evLink);
+  } else {
+    const text = j.choices?.[0]?.message?.content ?? JSON.stringify(j);
+    const dec = decision==='allow'?'ok':decision==='redact'?'warn':decision==='reroute'?'eu':'';
+    const meta = `${chip(dec, decision)} ${reasons.split(',').filter(Boolean).map(x=>chip(x.includes('WARNING')?'warn':x.includes('REDACT')?'warn':x.includes('REROUTE')?'eu':'', x)).join(' ')}
+      ${chip('eu', 'model '+h('x-agl-model')+(h('x-agl-rerouted')?' (rerouted)':''))} ${chip('', '€'+h('x-agl-cost-eur'))} ${h('x-agl-warning')?chip('warn', h('x-agl-warning')):''}`;
+    add('ai', text, meta, evLink);
+  }
+  $('send').disabled=false; whoami();
+}
+$('send').onclick = send;
+$('prompt').addEventListener('keydown', e => { if(e.key==='Enter' && (e.metaKey||e.ctrlKey)) send(); });
+loadUsers().then(()=> token && whoami());
+})();
+</script>
+</body>
+</html>

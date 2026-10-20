@@ -2,7 +2,8 @@
 import json, uuid, hashlib, datetime as dt
 from decimal import Decimal
 from fastapi import FastAPI, Request, Header, HTTPException
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse, FileResponse, RedirectResponse
+import os as _os
 from . import config, db, auth, dlp, policy, ledger, audit, formats, providers
 
 app = FastAPI(title="AGL gateway", version="0.1.0")
@@ -251,6 +252,24 @@ def list_models(authorization: str | None = Header(None)):
     identity_from_request(authorization)
     rows = db.all_("select alias from model_endpoint where status in ('approved','restricted','evaluating')")
     return {"object": "list", "data": [{"id": r["alias"], "object": "model", "owned_by": "agl"} for r in rows]}
+
+# ---------- web chat (static page served by the gateway; same origin, so it reads the X-AGL-* headers)
+_STATIC = _os.path.join(_os.path.dirname(__file__), "static")
+
+@app.get("/chat")
+def chat_page():
+    return FileResponse(_os.path.join(_STATIC, "chat.html"), media_type="text/html")
+
+@app.get("/")
+def root():
+    return RedirectResponse("/chat")
+
+@app.get("/agl/dev/users")
+def dev_users():
+    if not config.DEV_ISSUER:
+        raise HTTPException(404)
+    rows = db.all_("select subject, display_name from identity where kind='human' and status='active' order by subject")
+    return {"users": rows}
 
 # ---------- dev issuer (PoC stand-in for the IdP)
 @app.post("/agl/dev/mint")

@@ -10,6 +10,10 @@ gateway.{$DOMAIN} {
     tls internal
     reverse_proxy gateway:8000
 }
+chat.{$DOMAIN} {
+    tls internal
+    reverse_proxy gateway:8000
+}
 opa.{$DOMAIN} {
     tls internal
     reverse_proxy opa:8181
