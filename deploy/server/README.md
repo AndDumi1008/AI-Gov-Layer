@@ -17,7 +17,7 @@ Order of operations (docs/07 §10.5 and §10.7). Steps marked **(you)** need the
 | 11 | Run `demo/run-scenarios.sh` from the Mac with `AGL_URL=https://gateway.shortandsweet.home.ro` | me | — |
 | 12 | Tier 2: GitHub org + repos, runner container, Supabase stacks | later | `runner/` |
 
-Security posture of the result: only 443 (Caddy) and 22 (SSH) are reachable, and only from the Tailscale range; the governance network has no published ports and no route out except the egress proxy; model weights enter through an explicit pull job, not from inside the stack.
+Security posture of the result: only 22 (SSH), 53 (CoreDNS), 4000 (gateway, plain HTTP inside the encrypted tailnet) and 8443 (Caddy TLS) are reachable, and only from the Tailscale range; the governance network has no published ports and no route out except the egress proxy; model weights enter through an explicit pull job, not from inside the stack.
 
 ## On SERVER, step by step (as found on 2026-10-20)
 

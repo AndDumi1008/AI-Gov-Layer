@@ -3,7 +3,7 @@
     "tag:server": ["autogroup:admin"]
   },
   "acls": [
-    { "action": "accept", "src": ["autogroup:member"], "dst": ["tag:server:22", "tag:server:443", "tag:server:53"] }
+    { "action": "accept", "src": ["autogroup:member"], "dst": ["tag:server:22", "tag:server:53", "tag:server:4000", "tag:server:8443"] }
   ],
   "ssh": []
 }
