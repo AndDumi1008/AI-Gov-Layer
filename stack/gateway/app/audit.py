@@ -32,8 +32,10 @@ class Chain:
 
     def append(self, type_: str, body: dict, actor_identity_id=None, team_id=None, model_endpoint_id=None, outcome=None, reasons=None, cost_eur=None) -> dict:
         with self.lock:
+            from .runs import current_run   # run correlation id from the x-agl-run header, if any
+            run_id = body.get("run_id") or current_run.get()
             ev = {"event_id": str(uuid.uuid4()), "ts": dt.datetime.now(dt.timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
-                  "type": type_, "schema_version": 1, **body, "prev_hash": self._last_hash()}
+                  "type": type_, "schema_version": 1, **({"run_id": run_id} if run_id else {}), **body, "prev_hash": self._last_hash()}
             ev["hash"] = event_hash(ev)
             seg_id = self.open[0]["_segment_id"] if self.open else str(uuid.uuid4())
             db.run("""insert into audit_event (event_id, ts, type, actor_identity_id, team_id, model_endpoint_id, outcome, reasons, cost_eur, segment_id, prev_hash, hash, body)

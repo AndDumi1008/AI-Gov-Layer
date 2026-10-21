@@ -7,6 +7,10 @@ export AGL_URL="${AGL_URL:-http://127.0.0.1:4000}"
 ENV_FILE="${AGL_ENV_FILE:-stack/.env}"     # SERVER runs (also set AGL_CA_FILE=evidence/agl-root.crt for the Python CLI): point at a copy of SERVER's stack/.env; set DOCKER_CONTEXT=server too
 AGL="python3 stack/cli/agl"
 EV=evidence/run-$(date -u +%Y%m%dT%H%M%SZ); mkdir -p "$EV"
+# Open a run: records configuration digests (and drift) as the first event; every later event carries the run id.
+AGL_TOKEN_FILE="$EV/.tok-ines" $AGL login --as ines >/dev/null 2>&1
+export AGL_RUN=$(AGL_TOKEN_FILE="$EV/.tok-ines" $AGL run start --label "scenario suite $EV" 2>"$EV/run-start.err") || { echo "could not open a run (gateway down?)"; cat "$EV/run-start.err"; exit 1; }
+echo "run $AGL_RUN ($(cat "$EV/run-start.err" | sed 's/^# //'))"
 LOG="$EV/scenarios.log"; : > "$LOG"
 pass=0; fail=0
 BIND_IP=$(grep -E '^BIND_IP=' "$ENV_FILE" | cut -d= -f2); BIND_IP=${BIND_IP:-127.0.0.1}
@@ -133,5 +137,8 @@ r=$(as dana ask "hello while the model is down" --model claude-sonnet-4-5 -c INT
 docker compose -f stack/docker-compose.yml start "$SVC" >/dev/null 2>&1; sleep 3
 
 echo -e "\n== $pass passed, $fail failed. Evidence in $EV" | tee -a "$LOG"
+RESULT=$([ $fail -eq 0 ] && echo pass || echo fail)
+AGL_TOKEN_FILE="$EV/.tok-ines" $AGL run finish "$AGL_RUN" --result "$RESULT" --checks "{\"passed\":$pass,\"failed\":$fail}" > "$EV/run-finished.json" 2>/dev/null
+AGL_TOKEN_FILE="$EV/.tok-ines" $AGL run show "$AGL_RUN" > "$EV/run.json" 2>/dev/null
 as ines events --limit 5 > "$EV/last-events.json" 2>/dev/null; as ines audit verify > "$EV/chain-verification.json" 2>/dev/null
 [ $fail -eq 0 ]
