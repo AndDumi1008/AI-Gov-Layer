@@ -109,3 +109,19 @@ jobs:
           else
             echo "no AI trailer found"
           fi
+
+  ticket:
+    name: ticket
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Every change is traceable to a ticket (owner's working rule; docs/11 gap 12)
+        env:
+          BODY: ${{ github.event.pull_request.body }}
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          if printf '%s\n%s' "$TITLE" "$BODY" | grep -Eq '(^|[^A-Za-z0-9_/])(#[0-9]+|[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+)([^0-9]|$)'; then
+            echo "ticket reference found"
+          else
+            echo "::error::No ticket reference. Add 'Ticket: #<issue>' (or owner/repo#<issue>) to the PR description."; exit 1
+          fi

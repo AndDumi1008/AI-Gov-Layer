@@ -69,6 +69,8 @@ IDs are `PD-xx`, chronological.
 | PD-38 | The PoC was built by an ungoverned agent session with full operator privileges | open | 2026-10-20 |
 | PD-39 | Gate 1 turned on for this repository first; one human account limits what can be required | applied | 2026-10-20 |
 | PD-40 | parcel-app backend: PostgreSQL + PostgREST (Supabase core) per environment instead of the full self-host bundle | applied | 2026-10-20 |
+| PD-41 | No cloud account or spend in the PoC: an EU-region external model endpoint is out of scope; US-endpoint exception decision deferred (issue #19) | decided | 2026-10-21 |
+| PD-42 | GitHub Issues is the ticket system; every PR must reference an issue, enforced by the `ticket` check | applied | 2026-10-21 |
 
 ---
 
@@ -441,6 +443,20 @@ IDs are `PD-xx`, chronological.
 **Pros.** Two containers instead of twelve; every control is visible; nothing downloaded that was not reviewed. **Cons.** No Auth, Storage or Studio in the PoC; the frontend will mint sessions through the stand-in until Auth is added.
 **Found on the way.** The masking script cut the customer account link (fixed: `actor_id` kept); the customer tracking view needed a column-level grant on `stop`, which the SQL test had hidden because `count(*)` let the planner prune the subquery (fixed, test extended); PostgREST answers 403 for a role without a grant and 401 only without a token.
 **Applied in.** `parcel-app` PR 1; this repository: Caddy route `preview-api.<domain>` and docs/07 §10.6.
+**Status.** applied.
+
+## PD-41 — No money in the PoC: the EU-region external endpoint is out of scope
+
+**Problem.** The audit (docs/11, gap 1) ranks the US Anthropic endpoint under exception as the first thing to fix for guardrails G2 and G8. Closing it needs an EU-region provider endpoint (Bedrock or Vertex AI in an EU region), which needs a cloud account and incurs spend.
+**Decision (owner, 2026-10-21).** The PoC runs with no cloud account and no money. The EU-region endpoint is therefore out of scope for the replica and becomes a transfer-time item for the client's own accounts. Whether to keep the US exception for demos or revoke it and run INTERNAL work on the self-hosted tier only is deferred; tracked as issue #19, assigned to the owner, to be decided before the demo runbook is finalised.
+**Pros.** Honest scope; the registry already proves the mechanism (an approved non-EU endpoint cannot exist). **Cons.** The two Highest guardrails cannot be shown fully closed in the replica; the demo Q&A must say so.
+**Status.** decided.
+
+## PD-42 — GitHub Issues as the ticket system
+
+**Problem.** The brief's working rule "every change traceable to a ticket" scored Missing in docs/11.
+**Decision (owner, 2026-10-21).** GitHub Issues on both repositories. One issue per ranked gap (#6–#18) and one decision issue (#19). A `ticket` job in both CI workflows fails a PR whose title or description does not reference an issue (`#n` or `owner/repo#n`), and the rulesets require it. The PR template carries a `Ticket:` line.
+**Pros.** Zero cost; the reference is enforced, not requested. **Cons.** A reference is not a justification; review still has to check that the PR does what the issue says.
 **Status.** applied.
 
 ---
