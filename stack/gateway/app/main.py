@@ -140,7 +140,7 @@ def fingerprint(s: str) -> str:
 def err(surface: str, code: str, event_id: str | None, extra: dict | None = None, message: str | None = None):
     msg, status = MESSAGES.get(code, ("Request blocked by policy.", 403))
     body = formats.error_body(surface, status, code, message or msg, event_id, extra)
-    headers = {"X-AGL-Decision": "block", "X-AGL-Reasons": code}
+    headers = {"X-AGL-Decision": "block", "X-AGL-Reasons": ",".join((extra or {}).get("reasons") or [code])}   # every reason, not only the one that chose the message
     if event_id:
         headers["X-AGL-Event"] = event_id
     return JSONResponse(body, status_code=status, headers=headers)

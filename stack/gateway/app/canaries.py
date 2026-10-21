@@ -93,9 +93,9 @@ def c_egress(tok):
             s = socket.create_connection((host, port), timeout=4); s.close(); return "connected"
         except Exception as e:
             return type(e).__name__
-    neg_obs = probe("api.openai.com", 443)
+    neg_obs = probe("one.one.one.one", 443)   # any host outside the stack: there must be no route at all
     pos_obs = probe(config.LOCAL_BACKEND_URL.split("://", 1)[1].split("/")[0].split(":")[0], int(config.LOCAL_BACKEND_URL.rsplit(":", 1)[1].split("/")[0]))
-    return ({"action": "TCP connect from the gateway to api.openai.com:443", "observed": neg_obs, "refused": neg_obs != "connected"},
+    return ({"action": "TCP connect from the gateway to a public host (one.one.one.one:443)", "observed": neg_obs, "refused": neg_obs != "connected"},
             {"action": f"TCP connect from the gateway to the self-hosted model backend", "observed": pos_obs, "passed": pos_obs == "connected"})
 
 CANARIES = {
