@@ -23,3 +23,8 @@ def test_gates_and_self_merge_flags():
     assert [g["merge_commit"] for g in r["gates_not_green"]] == ["x"]
     assert [g["merge_commit"] for g in r["gates_not_reported"]] == ["z"]
     assert [s["merge_commit"] for s in r["self_merged"]] == ["y"]
+
+def test_old_record_version_is_reimported_not_mismatched():
+    old = rec("m1"); old.pop("gates_red"); old.pop("gates_not_reported")   # stored by the v1 collector, no record_version
+    r = scm.compare({"m1": old}, [rec("m1")])
+    assert r["upgrades"] == ["m1"] and [x["merge_commit"] for x in r["imports"]] == ["m1"] and r["mismatches"] == []
