@@ -128,6 +128,10 @@ AGL_TOKEN_FILE=/tmp/t-ines agl audit verify --simulate-tamper   # fail at one ev
 ```
 Close with the reset: `AGL_TOKEN_FILE=/tmp/t-ines agl demo-reset` and then `agl events --limit 1` as ines: the reset is the newest event in the chain. Nothing that happened in the room can be made to un-happen.
 
+## Act 6b — canaries from a prompt (3 min)
+
+In the chat: `/canary`. Eight rows, each with the violation that was refused and the clean input that passed, every row linking to its record. Then the same from the assistant: ask Claude Code, with the `agl` MCP server registered, to "run the canaries and show me the scoreboard". Say: the tool is the Model Context Protocol, not a vendor API; any assistant that speaks it can fire them.
+
 ## Act 7 — the pipeline (3 min, pages only)
 
 Open the Code to Production Journey. Walk steps 5 to 11 and one detour (rollback). Say plainly: this half is designed and the workflow files exist and lint, but it is not deployed in this PoC; it is Tier 2.
