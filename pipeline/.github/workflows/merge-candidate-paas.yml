@@ -1,11 +1,12 @@
-# Gate 2 (PaaS variant) — for the parcel app: Supabase backend on SERVER + Vercel frontend.
-# Builds the frontend ONCE into a prebuilt artifact, hashes it, and (only in merge_group
+# Gate 2 (PaaS variant) — for the parcel app: Supabase-format backend and static frontend, both on SERVER.
+# Builds the frontend ONCE into a static export, hashes it, and (only in merge_group
 # runs) signs it as a blob with cosign. Applies this PR's migrations forward on the PREVIEW
-# Supabase stack from the current staging schema with the expand/contract check, deploys
-# the prebuilt output as a Vercel PREVIEW deployment, runs e2e and N-1 contract tests.
+# stack from the current staging schema with the expand/contract check, deploys the
+# same artifact to the preview web container on SERVER, runs e2e and N-1 contract tests.
 #
-# Build once, deploy many: the bundle reads its backend URL at runtime from /api/config
-# (a Vercel env var), so the same artifact serves preview, staging and production.
+# Build once, deploy many: the bundle reads its backend URL at runtime from /config.json,
+# which `make web-deploy` writes per environment outside the bundle, so the same artifact
+# serves preview, staging and production (PD-44).
 #
 # PD-10: release signature only on merge_group. PD-11: read-only default token; the preview
 # job alone holds environment-scoped credentials. PD-18: runs-on from a repository variable.
@@ -33,13 +34,12 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # ratchet:actions/setup-node@v4
         with: {node-version: "22", cache: npm}
       - run: npm ci --ignore-scripts
-      - name: Build the Vercel output once (no env baked in; runtime config)
-        run: npx vercel@39 build --yes
-        env: {VERCEL_TELEMETRY_DISABLED: "1"}
+      - name: Build the static export once (no env baked in; runtime config)
+        run: make web-build # next build with output 'export' → out/
       - name: Package + migration manifest + hash
         id: hash
         run: |
-          tar -C .vercel -cf prebuilt.tar output
+          tar -C out -cf prebuilt.tar .
           # Migration checksums travel with the artifact; the production job compares them.
           ( cd supabase/migrations && sha256sum -- *.sql ) > migrations.sha256
           D=$(sha256sum prebuilt.tar | cut -d' ' -f1)
@@ -85,13 +85,13 @@ jobs:
         run: make functions-deploy ENV=preview
 
   preview:
-    name: vercel preview (main + PR)
+    name: web preview on SERVER (main + PR)
     runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || vars.AGL_RUNNER || 'ubuntu-latest' }}
     needs: [prebuilt, migrations]
     if: github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork
     environment:
-      name: preview
-      url: ${{ steps.deploy.outputs.url }}
+      name: preview # WEB_DEPLOY_KEY opens the preview web root only
+      url: https://preview.parcel.shortandsweet.home.ro
     permissions:
       contents: read
       pull-requests: write # status comment only
@@ -101,27 +101,21 @@ jobs:
         with:
           name: prebuilt-${{ github.sha }}
       - name: Verify the artifact hash before deploying
-        run: sha256sum -c prebuilt.sha256 && mkdir -p .vercel && tar -C .vercel -xf prebuilt.tar
-      - name: Deploy prebuilt output as a preview deployment (backend = preview-api on the tailnet)
-        id: deploy
-        env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+        run: sha256sum -c prebuilt.sha256
+      - name: Deploy the same artifact to the preview web container (backend = preview-api on the tailnet)
+        env: {WEB_DEPLOY_KEY: "${{ secrets.WEB_DEPLOY_KEY }}"}
         run: |
-          URL=$(npx vercel@39 deploy --prebuilt --yes --token "$VERCEL_TOKEN" \
-                --env AGL_BACKEND_URL=https://preview-api.shortandsweet.home.ro \
-                --meta pr=${{ github.event.pull_request.number }} --meta sha=${{ github.sha }})
-          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          make web-deploy ENV=preview ARTIFACT=prebuilt.tar DIGEST=${{ needs.prebuilt.outputs.digest }} \
+               BACKEND_URL=https://preview-api.shortandsweet.home.ro
       - name: Smoke + e2e (browser on the tailnet reaches the private backend)
-        run: make e2e BASE_URL="${{ steps.deploy.outputs.url }}" BACKEND_URL=https://preview-api.shortandsweet.home.ro
+        run: make e2e BASE_URL=https://preview.parcel.shortandsweet.home.ro BACKEND_URL=https://preview-api.shortandsweet.home.ro
       - name: Previous release contract tests against the new backend (N-1)
         run: make contract-tests PREVIOUS_RELEASE="$(git describe --tags --abbrev=0 origin/main)" BACKEND_URL=https://preview-api.shortandsweet.home.ro
       - name: Report on the PR
         env: {GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}"}
         run: |
           gh pr comment ${{ github.event.pull_request.number }} --body "**Merge candidate ready (PaaS)**
-          Preview: ${{ steps.deploy.outputs.url }} → backend preview-api.shortandsweet.home.ro (masked data)
+          Preview: https://preview.parcel.shortandsweet.home.ro → backend preview-api.shortandsweet.home.ro (masked data; one preview at a time, this PR's run)
           Artifact: \`${{ needs.prebuilt.outputs.digest }}\` (preview marker; release signature is produced in the merge queue)
           Migrations: applied forward on current staging schema, expand/contract OK
           Smoke/e2e: passed · N-1 contract tests: passed"
