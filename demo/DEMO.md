@@ -37,11 +37,11 @@ State the four proofs out loud; they are the agenda:
 
 ```bash
 agl whoami                       # identity from the IdP stand-in, team, roles, budget state
-agl models                       # two aliases: external (evaluating, under a 72 h exception) and self-hosted
+agl models                       # code-local (self-hosted, EU) approved; code-default revoked (PD-43)
 agl ask "Write a function that parses an ISO date." -c INTERNAL -r shortandsweet/booking-svc
 ```
 
-Point at the headers: `X-AGL-Decision: allow`, `X-AGL-Model: code-default`, `X-AGL-Cost-EUR`, `X-AGL-Event`. Then:
+Point at the headers: `X-AGL-Decision: allow`, `X-AGL-Model: code-local`, `X-AGL-Cost-EUR`, `X-AGL-Event`. Then:
 
 ```bash
 agl why <event id>               # the full event: who, which model, region, residency class, decision, policy reasons, prompt hash only
@@ -136,12 +136,12 @@ Open the Code to Production Journey. Walk steps 5 to 11 and one detour (rollback
 
 | Question | Answer |
 |----------|--------|
-| Is the Anthropic call EU-resident? | No. It is the direct US endpoint, allowed only by a 72-hour, dual-approved exception for INTERNAL data, visible in the registry as `evaluating`. The production path is an EU-region endpoint (Bedrock/Vertex EU) or an EU provider; the registry refuses to approve anything else (S14). |
+| Is any call processed outside the EU? | No. The owner closed the US exception (PD-43): every call runs on the self-hosted tier on SERVER. The registry cannot hold a usable non-EU endpoint (S14, S28), policy refuses one whatever the exceptions (S27), and the egress proxy has no allowed host (S25). An EU-region provider (Bedrock/Vertex EU) is a transfer-time item for the client's own accounts (PD-41). |
 | Is the local model good enough? | For CONFIDENTIAL work it is the only option by policy. Quality is a procurement question: a bigger card buys a bigger model. The PoC shows the mechanism, not the final model. |
 | Who can turn these controls off? | Policy and registry changes need two approvers and are themselves audit events. Nobody can edit or delete the audit record, including the people who run the system. |
 | What does it cost? | Metered to the cent per team and model; one Claude Code turn is about €0.03 at list price. The budget caps are real limits. |
 | What is not done? | Merge/deploy governance (Tier 2), IdP integration (tokens are hand-minted and expire in 8 h), high availability, Presidio-grade PII detection, and the 30-day retention on SERVER would be 24 months in production. |
-| What leaves the building? | For INTERNAL prompts: redacted text to the external model under the exception; the code to GitHub. For CONFIDENTIAL: nothing. Logs never leave. |
+| What leaves the building? | No prompt goes to any model outside SERVER. The code goes to GitHub (see PD-43 for what that means for EU only). Logs never leave. |
 
 ## After the room
 

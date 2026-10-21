@@ -16,7 +16,7 @@ python3 stack/cli/agl login --as dana && python3 stack/cli/agl ask "hello" -c IN
 | `postgres` :5432 | control plane, ledger, append-only audit hot copy (schema from docs/05 + `schema/002_poc.sql`, seed `010_seed.sql`) | `agl-net` |
 | `minio` :9001 console | WORM segments (Object Lock COMPLIANCE) | `agl-net` |
 | `minio-anchor` :9011 console | daily anchors, separate credentials | `agl-net` |
-| `egress-proxy` | squid allowlist (`api.anthropic.com`); the only container on both `agl-net` and `egress-net` | both |
+| `egress-proxy` | squid allowlist, empty since PD-43 (deny all); the only container on both `agl-net` and `egress-net` | both |
 | `mock-model` (profile mock) | deterministic stand-in; `/debug/last` shows what the model received | `agl-net` |
 | `ollama` (profile model) | local open-weight tier = `code-local` | `agl-net` |
 | `caddy`, `coredns` (profile edge) | TLS + hostnames on the tailnet | `edge-net` (+ `agl-net` for caddy) |
@@ -25,7 +25,7 @@ Seeded identities (dev issuer, `agl login --as <user>`): `dana` developer · `te
 
 Model weights: the in-stack `ollama` has no route to any registry; load weights with `deploy/server/pull-model.sh <model>` (one-off container sharing the volume). Local tier: set `AGL_LOCAL_BACKEND_URL=http://ollama:11434` and start with `--profile model`.
 
-Model aliases: `code-default` (external; `AGL_EXTERNAL_BACKEND=anthropic|mock`, evaluating under a 72 h exception) · `code-local` (self-hosted; CONFIDENTIAL goes here automatically).
+Model aliases: `code-local` (self-hosted, EU; the default for every request) · `code-default` (the former US endpoint, `revoked` and kept only as history; asking for it is refused with `NON_EU_ENDPOINT`). EU only, no exception: PD-43.
 
 Web chat: `https://chat.shortandsweet.home.ro:8443` (or `http://127.0.0.1:4000/chat` locally): connect as a seeded user, see team, roles, training and budget, and get the gateway verdict, model, cost and audit link on every answer.
 
