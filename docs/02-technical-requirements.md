@@ -93,16 +93,17 @@ flowchart LR
 |-----|--------|
 | T-PE-01 | Policy-as-code in Rego (OPA) or Cedar; versioned in Git; CI tests; signed bundles |
 | T-PE-02 | Inputs: identity claims, team, requested model, data classification (declared + detected), DLP findings, budget state, time, client type, environment tag |
-| T-PE-03 | Outputs: `allow` / `redact` / `block` / `reroute(model)` + reason codes + obligations (e.g. `log_content=false`) |
+| T-PE-03 | Outputs: `allow` / `block` / `reroute(model)` + reason codes + obligations (`log_content`: true for every request that reaches a model, D-12). No redact outcome since D-11 |
 | T-PE-04 | Decision log for every evaluation sent to audit store |
 | T-PE-05 | Hot reload of bundles with rollback |
 
 **Example policy intent** (expressed informally; Rego in repo later):
 
-- `classification >= CONFIDENTIAL` → only models with `residency = EU_SELF_HOSTED` or `EU_PROVIDER_ZERO_RETENTION`; content logging off.
+- `classification >= CONFIDENTIAL` → only models with `residency = EU_SELF_HOSTED` or `EU_PROVIDER_ZERO_RETENTION`. Content is stored like every other class (D-12).
 - `classification = RESTRICTED` (production data, secrets, special-category personal data) → **block** always.
 - `dlp.secret_detected` → block, notify security.
-- `dlp.pii_detected && classification <= INTERNAL` → redact and allow; record redaction count.
+- `dlp.pii_detected` → block, any classification (D-11). The gateway first sets aside the caller's own registered address and reserved test domains, counted as `own_identity` / `test_data`.
+- `identity.roles` has `client` (and not `developer`) and the request is not a product question from `/agl/ask`, or carries repository context → block `CLIENT_SCOPE` (D-13).
 - `budget.remaining <= 0` → block; `budget.remaining < 20%` → allow + warn.
 - `client.environment = production` → block (there should be no such caller; alert).
 
@@ -115,7 +116,7 @@ flowchart LR
 | T-DLP-03 | Company identifiers: customer IDs, internal hostnames, ticket IDs, project codenames (configurable dictionaries) |
 | T-DLP-04 | Classification labels from source: IDE plugin passes repository classification (from a repo manifest); documents carry sensitivity labels (MIP/AIP if used) |
 | T-DLP-05 | Runs in-region; no third-party DLP SaaS in the hot path |
-| T-DLP-06 | Redaction is reversible only within the gateway for the duration of the request (tokenised placeholders), never persisted |
+| T-DLP-06 | ~~Redaction reversible within the request.~~ Superseded by D-11: personal data blocks; exemptions (own address, reserved test domains) are counted in the event; block responses list finding types and counts, never values |
 
 ### 2.4 Budget Ledger
 
@@ -150,14 +151,14 @@ flowchart LR
 | T-AUD-07 | Streaming copy to SIEM |
 | T-AUD-08 | No personal data beyond identity of the caller (an employee) is stored here; prompt content is only a hash. This keeps GDPR erasure obligations away from the immutable store |
 
-### 2.7 Content Store (optional, separate)
+### 2.7 Content Store (separate; mandatory since D-12)
 
 | Req | Detail |
 |-----|--------|
-| T-CNT-01 | Prompt and response bodies stored only where policy obligation `log_content=true` (default: `INTERNAL` and below, opt-in per team) |
-| T-CNT-02 | Encrypted with a separate key per team; erasable per subject (GDPR), by key destruction or record deletion; deletion itself logged in audit store |
-| T-CNT-03 | Retention short (default 30 days) for debugging and quality review |
-| T-CNT-04 | Access requires two roles (security + team lead) and is logged |
+| T-CNT-01 | Prompt and response bodies, and agent commands with their output, stored wherever policy obligation `log_content=true`: every request that reaches a model, all classifications; blocked requests never. A request that cannot be stored is not sent (D-05, D-12) |
+| T-CNT-02 | Encrypted with a separate key per team (PoC: AES-256-GCM, HKDF-derived from one master key, bound to the audit event id); erasable per subject or per request (GDPR) by removing the bodies; the row and fingerprints stay; erasure logged in audit store |
+| T-CNT-03 | Retention 30 days (configurable; owner accepted, 2026-10-21), then bodies removed automatically and the count logged |
+| T-CNT-04 | Access requires two roles (security + team lead) and is logged. PoC: `security_admin` or `dpo` asks with a reason; a different `security_admin`, `dpo` or `team_lead` approves; the asker reads for 24 h; each step logged (`content_access_requested`, `content_access_approved`, `content_access`) |
 
 ### 2.8 Admin Console / API
 
@@ -292,8 +293,8 @@ Agentic CLIs (Claude Code, Codex CLI, etc.) are allowed in **sandboxes** only:
 | Level | Examples | AI handling |
 |-------|----------|-------------|
 | PUBLIC | Open-source code, public docs | Any approved model |
-| INTERNAL | Most internal code, docs without personal data | Approved EU models; content logging allowed |
-| CONFIDENTIAL | Customer-related code paths, architecture with security detail, personal data of employees in docs | EU zero-retention or self-hosted only; content logging off; DLP redaction mandatory |
+| INTERNAL | Most internal code, docs without personal data | Approved EU models; content stored (30 days) |
+| CONFIDENTIAL | Customer-related code paths, architecture with security detail, personal data of employees in docs | EU zero-retention or self-hosted only; content stored (30 days); personal data blocks |
 | RESTRICTED | Production data, secrets, keys, special-category personal data, M&A | **Never** sent to any AI |
 
 Repositories carry a `.classification` manifest consumed by IDE plugins and CI; default for unlabelled repos is CONFIDENTIAL.
@@ -304,7 +305,7 @@ Repositories carry a `.classification` manifest consumed by IDE plugins and CI; 
 - Prompt injection: treat all model output as untrusted input; agents run with least privilege; indirect injection from fetched web/MCP content mitigated by allowlists and sandboxing.
 - Supply chain: pinned model versions in registry; pinned MCP servers; SBOM for gateway; signed policy bundles.
 - Secrets: vendor keys only in gateway; rotation ≤ 90 days; no keys in client config.
-- Logging hygiene: audit store holds no prompt text; DLP match details stored as type + count only.
+- Logging hygiene: audit store holds no prompt text or command text, only fingerprints; DLP match details stored as type + count only; bodies live in the content store (T-CNT).
 - Pen test of gateway and admin console before go-live; annual thereafter.
 
 ## 10. Observability and operations

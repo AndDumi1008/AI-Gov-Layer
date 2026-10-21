@@ -40,25 +40,23 @@ sequenceDiagram
   G->>G: Authenticate, resolve identity/team/cost centre
   G->>R: Lookup (model) → tuple, status, ceiling, price
   G->>D: Scan prompt (secrets, PII, identifiers)
-  D-->>G: findings {types, counts, spans}
+  D-->>G: findings {types, counts}, exempt {own_identity, test_data}
   G->>B: Reserve estimated cost
   B-->>G: reservation_id | insufficient
   G->>P: Evaluate(identity, team, model, classification, findings, budget)
-  P-->>G: decision {allow|redact|block|reroute, reasons, obligations}
+  P-->>G: decision {allow|block|reroute, reasons, obligations}
   G->>A: Write request + decision event (hash-chained)
   alt block
     G-->>C: 4xx + reason codes + remediation text
     G->>B: Release reservation
-  else allow / redact
-    G->>G: Apply redaction placeholders if required
-    G->>M: Forward (vendor key from secrets manager, region-pinned)
-    M-->>G: Stream response
-    G-->>C: Stream response (placeholders restored)
+  else allow / reroute
+    Note over G: obligation log_content and no content key → fail closed, nothing sent (D-05, D-12)
+    G->>M: Forward unchanged (vendor key from secrets manager, region-pinned)
+    M-->>G: Response
     G->>B: Settle actual tokens/cost
-    G->>A: Write completion event (tokens, cost, provider id, fingerprints)
-    opt obligation log_content
-      G->>G: Encrypt + store bodies in Content Store
-    end
+    G->>G: Encrypt + store prompt and answer in Content Store (write fails → answer withheld)
+    G->>A: Write completion event (tokens, cost, provider id, fingerprints, content stored)
+    G-->>C: Response + X-AGL-Content: stored 30d
   end
 ```
 
@@ -69,8 +67,9 @@ sequenceDiagram
 | Model not `approved`/`restricted` in registry | block, `MODEL_NOT_APPROVED` |
 | Classification above model ceiling | block, `CLASSIFICATION_CEILING` |
 | Secret detected | block, `SECRET_DETECTED`; security notified |
-| PII detected, classification ≤ INTERNAL | redact + allow, `PII_REDACTED` |
-| PII detected, classification CONFIDENTIAL | block unless model is zero-retention/self-hosted, else redact |
+| Someone else's personal data detected, any classification | block, `PII_DETECTED`; response lists types and counts (D-11) |
+| Only the caller's own address or reserved test domains | allow; counted in the event as `own_identity` / `test_data` |
+| Client account, not a product question from `/agl/ask`, or with repository context | block, `CLIENT_SCOPE` (D-13) |
 | Budget hard cap reached | block, `BUDGET_EXHAUSTED` |
 | Budget ≥ soft threshold | allow + header `X-AGL-Warning: budget 85%` |
 | Policy engine / ledger / audit unavailable | block, `GOVERNANCE_UNAVAILABLE` (fail closed) |
@@ -115,8 +114,8 @@ stateDiagram-v2
 
 ## F-05 DLP block and remediation
 
-1. Request blocked with `SECRET_DETECTED` or `RESTRICTED_DATA`.
-2. Client shows: what *type* was found (e.g. "AWS access key pattern", "IBAN"), *not* the value; remediation: remove the data, use a placeholder, or raise the repo classification question with security.
+1. Request blocked with `SECRET_DETECTED`, `PII_DETECTED` or `RESTRICTED_DATA`. Nothing is sent and nothing is stored in the content store.
+2. Client shows: what *type* was found and how many (e.g. "2 × EMAIL", "AWS access key pattern", "IBAN"), *not* the value; remediation: remove the data, use a placeholder, use an address on a reserved test domain (example.com, *.test), or raise the repo classification question with security.
 3. Secret detections also create a security ticket automatically (possible real leak into the codebase or clipboard); on-call triages: rotate secret if confirmed real.
 4. Repeated detections by the same identity (≥ 3 in 24 h) → team lead notified; training refresh assigned.
 5. False positive → developer can flag it from the console; DLP rule owner tunes the rule via policy-as-code PR (itself reviewed).
@@ -215,8 +214,8 @@ Rules enforced here: DEP-01..08 (TRD §6). The approval step cannot be satisfied
 ## F-11 GDPR request against content store
 
 1. DPO receives DSAR or erasure request concerning a subject (an employee, or a third party whose data may appear in prompts).
-2. DPO searches the content store (not the audit store) via two-role access.
-3. Erasure: records deleted or team key destroyed where whole-team scope; `content_erasure` event written to the immutable audit store (the audit store contains no personal content, only identities of employees as actors, which is retained under the legitimate interest / legal obligation basis documented in the DPIA).
+2. DPO searches the content store (not the audit store) via two-role access. PoC: `agl content request <event> --reason …` by `dpo` or `security_admin`, approved by a different person (`agl content approve <id>`), then `agl content show <event> --access <id>`; each step an audit event.
+3. Erasure: bodies removed per request or per person (`agl content erase --subject <user> | --event <id> --reason …`), the row and fingerprints kept as proof, or team key destroyed where whole-team scope; `content_erased` event written to the immutable audit store (the audit store contains no personal content, only identities of employees as actors, which is retained under the legitimate interest / legal obligation basis documented in the DPIA).
 4. Response to the subject compiled by DPO.
 
 ## F-12 Incident: suspected data leak via AI

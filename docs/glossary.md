@@ -9,7 +9,9 @@
 | **Break-glass** | Time-boxed, dual-approved exception to a control, fully logged |
 | **CASB** | Cloud Access Security Broker — controls SaaS usage from corporate devices |
 | **Classification ceiling** | Highest data classification a model endpoint may receive |
-| **Content store** | Separate encrypted store for prompt/response bodies, erasable, short retention |
+| **Content store** | Separate encrypted store for prompt/response bodies and agent commands with output; mandatory, 30 days, erasable (D-12) |
+| **Client account** | Identity with the `client` role: asks product questions only, answered from the feature catalog (D-13) |
+| **Feature catalog** | `stack/catalog/features.json`: what the platform does today, with status and the checks that prove it; the only source for client answers |
 | **Delegated identity** | Short-lived identity for an agent run acting on behalf of a human, scoped to a sandbox |
 | **DLP** | Data Loss Prevention — detection of secrets, personal data and identifiers in prompts |
 | **DPA** | Data Processing Agreement under GDPR Art. 28 |

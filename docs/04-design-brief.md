@@ -11,7 +11,7 @@
 
 AGL is mostly invisible infrastructure. The parts people *see* are:
 
-1. **In-tool feedback** — the messages a developer gets inside the IDE/CLI when something is redacted, warned or blocked.
+1. **In-tool feedback** — the messages a developer gets inside the IDE/CLI when something is warned or blocked.
 2. **Admin Console** — a web application for team leads, security, DPO, finance and auditors.
 3. **PR surface** — labels, checklists and status checks inside the Git hosting UI.
 4. **Notifications** — budget thresholds, DLP alerts, exception approvals in chat/email.
@@ -43,14 +43,17 @@ The brief covers tone, principles, information architecture, key screens and acc
 
 - Plain, direct, neutral. Second person for the developer ("Your request was blocked because…").
 - Reason codes shown as short labels (`SECRET_DETECTED`) *and* human text. The code is for search and support; the text is for the person.
-- No blame language ("violation", "offender"). Use "blocked", "redacted", "needs approval".
+- No blame language ("violation", "offender"). Use "blocked", "not sent", "needs approval".
 
 **Example in-band messages**
 
 | Situation | Message |
 |-----------|---------|
 | Secret | **Blocked — a credential pattern (AWS access key) was found in your prompt.** Remove it or replace it with a placeholder such as `<AWS_KEY>`. If this key is real, rotate it now: <runbook link>. Ref `SECRET_DETECTED` · event `evt_…` |
-| PII redacted | **Sent with 3 items redacted (2 email addresses, 1 phone number).** The model saw placeholders. Ref `PII_REDACTED` |
+| Personal data | **Blocked — personal data was found in your prompt (2 email addresses, 1 phone number), so nothing was sent.** Remove it or use a placeholder such as `<EMAIL>`; your own address and test domains (example.com, *.test) are fine. Ref `PII_DETECTED` |
+| Client scope | **Client accounts can ask product questions only.** Ask what the platform does today, or list everything with `/features`. Ref `CLIENT_SCOPE` |
+| Stored | Chip on every answer: **prompt stored 30d** (content store; reading it takes two people, and every read is logged). |
+| Store down | **Blocked — the prompt could not be stored, so it was not sent.** Ref `GOVERNANCE_UNAVAILABLE` |
 | Ceiling | **Blocked — this repository is classified CONFIDENTIAL; model `gpt-x (Azure, Sweden Central)` is approved up to INTERNAL.** Use `mistral-y (EU, zero-retention)` or ask security about the classification. Ref `CLASSIFICATION_CEILING` |
 | Budget | **Blocked — your team's October AI budget is used up (€4,000 / €4,000).** Your team lead can request a top-up: <link>. Ref `BUDGET_EXHAUSTED` |
 | Budget warning | **Note: your team has used 85 % of this month's AI budget.** |
@@ -70,7 +73,7 @@ AGL Console
 │   ├── Requests explorer (filter, drill to event)
 │   └── Agent sessions (sandbox runs, actions)
 ├── Decisions
-│   ├── Blocks & redactions (by reason code, trend)
+│   ├── Blocks (by reason code, trend) and DLP exemptions (own address, test data)
 │   └── False-positive flags (queue)
 ├── Models & Vendors
 │   ├── Registry (status, region, ceiling, review date)

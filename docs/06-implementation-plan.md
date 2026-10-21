@@ -99,7 +99,7 @@ gantt
 | 3.4 | Sandbox orchestrator: ephemeral environments, delegated identities (≤ 8 h), allowlisted MCP servers, agent action logging | F-03 end-to-end for Claude Code or equivalent |
 | 3.5 | Quarterly isolation test automated (F-14) | First run recorded |
 | 3.6 | Egress blocks for non-gateway AI endpoints on corporate network and devices (DNS/proxy/CASB), in warn mode | Bypass rate measured |
-| 3.7 | Content store (optional, per Q7) with per-team keys, 2-role access, erasure flow | F-11 tested |
+| 3.7 | Content store (mandatory since D-12: prompts, answers, agent commands) with per-team keys, 2-role access, 30-day retention, erasure flow | F-11 tested |
 
 **Exit criteria:** isolation test passes; sandboxes in use by pilot teams.
 
@@ -107,7 +107,7 @@ gantt
 
 | # | Deliverable | Acceptance |
 |---|-------------|------------|
-| 4.1 | DLP to **enforce** (block secrets, redact PII) after tuning; false-positive flag flow | FP rate < 2 % on sample |
+| 4.1 | DLP to **enforce** (block secrets and personal data, D-11) after tuning; false-positive flag flow | FP rate < 2 % on sample |
 | 4.2 | Egress blocks to **enforce**; direct vendor keys revoked; card subscriptions cancelled | < 1 % bypass |
 | 4.3 | Roll out to all engineering teams; budgets for all cost centres | 100 % teams with envelopes |
 | 4.4 | Branch protection + gates on all repositories in scope | Compliance report 100 % |

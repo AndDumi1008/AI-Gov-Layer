@@ -521,6 +521,8 @@ create trigger audit_anchor_no_mutation  before update or delete or truncate on 
 
 ## 5. Content store
 
+PoC additions (`stack/schema/030_content_store.sql`, D-12 / PD-50): `kind` (`completion` or `agent_action`) and `identity_id` (erasure per person); `team_id` nullable (identities without a team use the org key); a trigger lets bodies be removed but never rewritten and keeps erased records erased; the gateway role may insert and update, never delete.
+
 ```sql
 create table content_record (
   id              uuid primary key,
