@@ -4,7 +4,7 @@ from app import scm
 
 def rec(mc, **kw):
     base = {"merge_commit": mc, "head_sha": "h" + mc, "author": "a", "merged_by": "b", "merged_at": "t", "base_ref": "main",
-            "required_checks": {"ci": "success"}, "gates_green": True, "approvals": ["b"], "labels": [], "post_merge_run": {"id": 1, "conclusion": "success", "name": "ci"}, "pr": 1}
+            "required_checks": {"ci": "success"}, "gates_green": True, "gates_red": [], "gates_not_reported": [], "approvals": ["b"], "labels": [], "post_merge_run": {"id": 1, "conclusion": "success", "name": "ci"}, "pr": 1}
     base.update(kw); return base
 
 def test_import_match_change_missing():
@@ -18,6 +18,8 @@ def test_import_match_change_missing():
     assert r["mismatches"][0]["diff"]["merged_by"] == {"chain": "b", "scm": "c"}
 
 def test_gates_and_self_merge_flags():
-    r = scm.compare({}, [rec("x", gates_green=False, required_checks={"ci": "failure"}), rec("y", author="a", merged_by="a")])
+    r = scm.compare({}, [rec("x", gates_green=False, gates_red=["ci"], required_checks={"ci": "failure"}), rec("y", author="a", merged_by="a"),
+                         rec("z", gates_green=False, gates_not_reported=["ticket"], required_checks={"ci": "success", "ticket": None})])
     assert [g["merge_commit"] for g in r["gates_not_green"]] == ["x"]
+    assert [g["merge_commit"] for g in r["gates_not_reported"]] == ["z"]
     assert [s["merge_commit"] for s in r["self_merged"]] == ["y"]

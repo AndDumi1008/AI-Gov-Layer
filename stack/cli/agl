@@ -71,12 +71,14 @@ def collect_github(repo: str, base: str, limit: int) -> list:
     for p in prs:
         mc = (p.get("mergeCommit") or {}).get("oid")
         if not mc: continue
+        # Check runs attach to the commit they ran on: PR-only jobs (ai-label, ticket) report on the PR head,
+        # the post-merge run on the merge commit. Take both; a reported success wins over skipped/none.
+        rank = {"success": 3, "failure": 2, "cancelled": 2, "timed_out": 2, "action_required": 2, "neutral": 1, "skipped": 1, None: 0}
         checks = {}
-        for cr in json.loads(gh("api", f"repos/{repo}/commits/{mc}/check-runs", "--jq", "[.check_runs[] | {name, conclusion}]") or "[]"):
-            checks[cr["name"]] = cr.get("conclusion")
-        if not checks:   # checks ran on the PR merge ref; the merge commit itself may carry only the push run
-            for cr in json.loads(gh("api", f"repos/{repo}/commits/{p['headRefOid']}/check-runs", "--jq", "[.check_runs[] | {name, conclusion}]") or "[]"):
-                checks.setdefault(cr["name"], cr.get("conclusion"))
+        for sha in (mc, p["headRefOid"]):
+            for cr in json.loads(gh("api", f"repos/{repo}/commits/{sha}/check-runs", "--jq", "[.check_runs[] | {name, conclusion}]") or "[]"):
+                if rank.get(cr.get("conclusion"), 0) > rank.get(checks.get(cr["name"]), 0):
+                    checks[cr["name"]] = cr.get("conclusion")
         req_status = {c: checks.get(c) for c in required}
         runs_ = json.loads(gh("run", "list", "--repo", repo, "--branch", base, "--commit", mc, "--json", "databaseId,conclusion,name", "--limit", "5") or "[]")
         out.append({
@@ -84,7 +86,10 @@ def collect_github(repo: str, base: str, limit: int) -> list:
             "author": (p.get("author") or {}).get("login"), "merged_by": (p.get("mergedBy") or {}).get("login"), "merged_at": p.get("mergedAt"),
             "labels": sorted(l["name"] for l in p.get("labels", [])),
             "approvals": sorted({r["author"]["login"] for r in p.get("reviews", []) if r.get("state") == "APPROVED"}),
-            "required_checks": req_status, "gates_green": bool(required) and all(v == "success" for v in req_status.values()),
+            "required_checks": req_status,
+            "gates_green": bool(required) and all(v == "success" for v in req_status.values()),
+            "gates_red": sorted(c for c, v in req_status.items() if v in ("failure", "cancelled", "timed_out", "action_required")),
+            "gates_not_reported": sorted(c for c, v in req_status.items() if v is None),
             "post_merge_run": {"id": runs_[0]["databaseId"], "conclusion": runs_[0]["conclusion"], "name": runs_[0]["name"]} if runs_ else None,
         })
     return out
@@ -174,7 +179,8 @@ def main():
             st, h, b = call("POST", "/agl/scm/reconcile", {"repo": repo, "records": recs})
             if st >= 400: out(st, b)
             results.append(b); overall = b["result"] if b["result"] == "fail" else overall
-            print(f"{repo}: {b['result']} · imported {b['imported']} · matched {b['matched']} · mismatches {len(b['mismatches'])} · gates not green {len(b['gates_not_green'])} · self-merged {b['self_merged']}")
+            print(f"{repo}: {b['result']} · imported {b['imported']} · matched {b['matched']} · mismatches {len(b['mismatches'])} · gates red {len(b['gates_not_green'])} · gates not reported (historical) {len(b.get('gates_not_reported', []))} · self-merged {b['self_merged']}")
+            for g in b.get("gates_not_reported", []): print("   not reported", json.dumps(g))
             for m in b["mismatches"]: print("   MISMATCH", json.dumps(m))
             for g in b["gates_not_green"]: print("   GATE NOT GREEN", json.dumps(g))
         print(json.dumps({"result": overall, "repos": results}, default=str)) if os.environ.get("AGL_JSON") else None

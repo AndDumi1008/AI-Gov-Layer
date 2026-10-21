@@ -12,7 +12,7 @@ import json
 from . import db, audit
 
 # Fields of a merge record that must stay identical between GitHub and the chain.
-COMPARED = ("merge_commit", "head_sha", "author", "merged_by", "merged_at", "base_ref", "required_checks", "gates_green", "approvals", "labels", "post_merge_run")
+COMPARED = ("merge_commit", "head_sha", "author", "merged_by", "merged_at", "base_ref", "required_checks", "gates_green", "gates_red", "gates_not_reported", "approvals", "labels", "post_merge_run")
 
 def fingerprint(rec: dict) -> dict:
     return {k: rec.get(k) for k in COMPARED}
@@ -42,9 +42,13 @@ def compare(existing: dict, incoming: list) -> dict:
     for mc, body in existing.items():
         if mc not in seen:
             mismatches.append({"kind": "missing_in_scm", "merge_commit": mc, "pr": body.get("pr")})
-    red = [{"merge_commit": r["merge_commit"], "pr": r.get("pr"), "required_checks": r.get("required_checks")} for r in incoming if not r.get("gates_green", False)]
+    # A required check that REPORTED failure fails the reconciliation. One that never reported (the check did not
+    # exist when the PR merged, or the job did not run) is listed, not failed: a control cannot have been observed
+    # before it existed; the register records when each check was introduced.
+    red = [{"merge_commit": r["merge_commit"], "pr": r.get("pr"), "gates_red": r.get("gates_red"), "required_checks": r.get("required_checks")} for r in incoming if r.get("gates_red")]
+    not_reported = [{"merge_commit": r["merge_commit"], "pr": r.get("pr"), "gates_not_reported": r.get("gates_not_reported")} for r in incoming if r.get("gates_not_reported")]
     self_merged = [{"merge_commit": r["merge_commit"], "pr": r.get("pr")} for r in incoming if r.get("author") and r.get("author") == r.get("merged_by")]
-    return {"imports": imports, "matches": matches, "mismatches": mismatches, "gates_not_green": red, "self_merged": self_merged}
+    return {"imports": imports, "matches": matches, "mismatches": mismatches, "gates_not_green": red, "gates_not_reported": not_reported, "self_merged": self_merged}
 
 def reconcile(repo: str, incoming: list, submitted_by: str, actor_id: str) -> dict:
     """Import new records, append the result event, return the verdict."""
@@ -57,7 +61,7 @@ def reconcile(repo: str, incoming: list, submitted_by: str, actor_id: str) -> di
     result = "pass" if not res["mismatches"] and not res["gates_not_green"] else "fail"
     ev = audit.chain.append("reconcile_result", {"repo": repo, "source": "github", "collected_by": submitted_by, "result": result,
                             "imported": len(imported_ids), "matched": len(res["matches"]), "mismatches": res["mismatches"], "gates_not_green": res["gates_not_green"],
-                            "self_merged": len(res["self_merged"]), "note": "self-merge is permitted while required approvals = 0 (PD-39); counted, not failed"},
+                            "gates_not_reported": res["gates_not_reported"], "self_merged": len(res["self_merged"]), "note": "self-merge is permitted while required approvals = 0 (PD-39); counted, not failed"},
                             actor_identity_id=actor_id, outcome=result)
     return {"repo": repo, "result": result, "imported": len(imported_ids), "matched": len(res["matches"]), "mismatches": res["mismatches"],
-            "gates_not_green": res["gates_not_green"], "self_merged": len(res["self_merged"]), "event_id": ev["event_id"]}
+            "gates_not_green": res["gates_not_green"], "gates_not_reported": res["gates_not_reported"], "self_merged": len(res["self_merged"]), "event_id": ev["event_id"]}
