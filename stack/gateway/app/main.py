@@ -557,10 +557,17 @@ def scoreboard_json(run_id: str, authorization: str | None = Header(None)):
         if c:
             by_check.setdefault(c, []).append({"seq": e["seq"], "event_id": str(e["event_id"]), "type": e["type"], "outcome": e["outcome"], "reasons": e["reasons"] or []})
     results = {r["id"]: r for r in ((fin or {}).get("checks") or {}).get("results", [])}
+    # Events are tagged by scenario (S2); results may be per check (S2a, S2b). A check without events of its own
+    # shows the events of its scenario; a scenario id whose events were all claimed by checks is not listed twice.
+    base = lambda cid: re.sub(r"[a-z]$", "", cid)
+    claimed = set()
     checks = []
-    for cid in sorted(set(by_check) | set(results), key=lambda x: (int(re.sub(r"\D", "", x) or 0), x)):
-        checks.append({"id": cid, "result": results.get(cid, {}).get("result", "no result recorded"), "expect": results.get(cid, {}).get("expect"),
-                       "events": by_check.get(cid, [])})
+    for cid in sorted(results, key=lambda x: (int(re.sub(r"\D", "", x) or 0), x)):
+        evs_ = by_check.get(cid) or by_check.get(base(cid), [])
+        if not by_check.get(cid) and by_check.get(base(cid)): claimed.add(base(cid))
+        checks.append({"id": cid, "result": results[cid].get("result"), "expect": results[cid].get("expect"), "events": evs_})
+    for cid in sorted(set(by_check) - set(results) - claimed, key=lambda x: (int(re.sub(r"\D", "", x) or 0), x)):
+        checks.append({"id": cid, "result": "no result recorded", "expect": None, "events": by_check[cid]})
     verifs = [{"event_id": str(e["event_id"]), "seq": e["seq"], **{k: e["body"].get(k) for k in ("result", "events_verified", "segments", "broken_links", "hot_copy_mismatches", "anchors_matching", "anchors", "simulated_tamper")}} for e in evs if e["type"] == "chain_verified"]
     recon = [{"event_id": str(e["event_id"]), "seq": e["seq"], **{k: e["body"].get(k) for k in ("repo", "result", "imported", "matched", "mismatches", "gates_not_green", "gates_not_reported", "self_merged")}} for e in evs if e["type"] == "reconcile_result"]
     return {"run_id": run_id, "rendered_from_events": len(evs), "first_seq": evs[0]["seq"], "last_seq": evs[-1]["seq"],
