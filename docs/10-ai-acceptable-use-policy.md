@@ -47,7 +47,7 @@ AI tools are allowed and encouraged for software development and internal work, 
 
 ## 6. Exceptions
 
-Exceptions are time-boxed (72 hours maximum), dual-approved, logged with an identifier that appears on every request made under them, and reviewed afterwards. The current one is the external model endpoint used during evaluation.
+Exceptions are time-boxed (72 hours maximum), dual-approved, logged with an identifier that appears on every request made under them, and reviewed afterwards. No exception can enable processing outside the EU (PD-43); the one that allowed the US endpoint during evaluation is closed.
 
 ## 7. Monitoring and consequences
 

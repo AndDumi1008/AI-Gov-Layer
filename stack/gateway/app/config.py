@@ -17,18 +17,14 @@ AUDIT_RETENTION_DAYS = int(env("AUDIT_RETENTION_DAYS", "1"))
 SEGMENT_MAX_EVENTS = int(env("AGL_SEGMENT_MAX_EVENTS", "20"))
 SEGMENT_MAX_SECONDS = int(env("AGL_SEGMENT_MAX_SECONDS", "60"))
 
-EXTERNAL_BACKEND = env("AGL_EXTERNAL_BACKEND", "mock")          # anthropic | mock
-ANTHROPIC_API_KEY = env("ANTHROPIC_API_KEY", "")
-ANTHROPIC_MODEL = env("ANTHROPIC_MODEL", "claude-sonnet-4-5")
-ANTHROPIC_URL = env("ANTHROPIC_URL", "https://api.anthropic.com")
+# EU only, no exception (PD-43): the self-hosted tier is the only backend; there is no external provider adapter.
 LOCAL_BACKEND_URL = env("AGL_LOCAL_BACKEND_URL", "http://mock-model:8000")
 LOCAL_MODEL = env("AGL_LOCAL_MODEL", "qwen2.5-coder:7b")
-MOCK_URL = env("AGL_MOCK_URL", "http://mock-model:8000")
 
 DEV_ISSUER = env("AGL_DEV_ISSUER", "true").lower() == "true"
 ISSUER = "agl-dev-issuer"
 AUDIENCE = "agl"
 KEYS_DIR = env("AGL_KEYS_DIR", "/keys")
 TOKEN_TTL_HOURS = 8
-DEFAULT_ALIAS = env("AGL_DEFAULT_ALIAS", "code-default")
 LOCAL_ALIAS = env("AGL_LOCAL_ALIAS", "code-local")
+DEFAULT_ALIAS = env("AGL_DEFAULT_ALIAS", LOCAL_ALIAS)

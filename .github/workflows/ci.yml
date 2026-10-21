@@ -68,13 +68,17 @@ jobs:
       - name: Load migrations and seed
         run: |
           sudo apt-get install -y -q postgresql-client >/dev/null
-          for f in stack/schema/001_core.sql stack/schema/002_poc.sql stack/schema/010_seed.sql; do psql -h localhost -U postgres -v ON_ERROR_STOP=1 -q -f "$f"; done
-      - name: Constraints hold (append-only audit, non-EU approved endpoint, quarantine guard)
+          for f in stack/schema/001_core.sql stack/schema/002_poc.sql stack/schema/010_seed.sql stack/schema/020_eu_only.sql; do psql -h localhost -U postgres -v ON_ERROR_STOP=1 -q -f "$f"; done
+      - name: Constraints hold (append-only audit, EU only, quarantine guard)
         run: |
           set -e
           fail(){ echo "::error::$1"; exit 1; }
           psql -h localhost -U postgres -c "insert into audit_segment(id,started_at) values (gen_random_uuid(),now()); delete from audit_segment;" 2>&1 | grep -q 'append-only' || fail "audit delete was not refused"
           psql -h localhost -U postgres -c "update model_endpoint set status='approved' where alias='code-default';" 2>&1 | grep -q 'violates check constraint' || fail "non-EU approved endpoint was not refused"
+          psql -h localhost -U postgres -c "update model_endpoint set status='evaluating' where alias='code-default';" 2>&1 | grep -q 'violates check constraint' || fail "non-EU evaluating endpoint was not refused"
+          [ "$(psql -h localhost -U postgres -tAc "select status from model_endpoint where alias='code-default'")" = revoked ] || fail "the US endpoint is not revoked"
+          [ "$(psql -h localhost -U postgres -tAc "select count(*) from exception where type='model_enable' and status='approved'")" = 0 ] || fail "a model_enable exception is still approved"
+          grep -qE '^\s*acl\s+allowed_dst\b' stack/proxy/squid.conf && fail "egress allowlist is not empty"
           psql -h localhost -U postgres -c "update repository set ai_exposure='allowed' where full_name='shortandsweet/app-x';" 2>&1 | grep -q 'gate not satisfied' || fail "quarantine guard did not fire"
           echo "constraints OK"
 

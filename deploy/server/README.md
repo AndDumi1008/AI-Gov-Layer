@@ -9,7 +9,7 @@ Order of operations (docs/07 §10.5 and §10.7). Steps marked **(you)** need the
 | 3 | `.wslconfig` with memory for WSL 2 | you | `wslconfig.ini` → `%UserProfile%\.wslconfig`, then `wsl --shutdown` |
 | 4 | Docker Desktop: WSL 2 backend, "Expose daemon" **off**, GPU support on | you | — |
 | 5 | Docker context from the Mac; clone the repo on SERVER inside the WSL filesystem | me | `docker-context.sh` |
-| 6 | `stack/.env` on SERVER: real passwords, `BIND_IP` = SERVER's Tailscale IP, `SERVER_TS_IP`, `ANTHROPIC_API_KEY` (you type it; I never see it), `AGL_EXTERNAL_BACKEND=anthropic`, `AGL_LOCAL_BACKEND_URL=http://ollama:11434`, `AGL_LOCAL_MODEL=qwen2.5-coder:7b` | you + me | — |
+| 6 | `stack/.env` on SERVER: real passwords, `BIND_IP` = SERVER's Tailscale IP, `SERVER_TS_IP`, `AGL_LOCAL_BACKEND_URL=http://ollama:11434`, `AGL_LOCAL_MODEL=qwen2.5-coder:7b` | you + me | — |
 | 7 | Bring up core + model + edge profiles with the GPU overlay; side-load the model weights | me | `Makefile: up-server` + `pull-model.sh` |
 | 8 | Tailscale split DNS: `shortandsweet.home.ro → <SERVER Tailscale IP>` | you | admin console |
 | 9 | Caddy root certificate into the Mac keychain | you | `trust-ca.sh` prints the steps |
@@ -27,7 +27,7 @@ SERVER has no Ubuntu distro: the only WSL 2 distro is Docker Desktop's own. The 
 2. `stack\.env` was generated with random passwords and the Tailscale addresses. Add your Anthropic key and switch the external tier on, in an elevated or normal PowerShell:
 
 ```powershell
-notepad D:\Projects\AI-Gov-Layer\stack\.env     # set ANTHROPIC_API_KEY=... and AGL_EXTERNAL_BACKEND=anthropic
+notepad D:\Projects\AI-Gov-Layer\stack\.env     # passwords and IPs; no provider key: EU only, no external tier (PD-43)
 ```
 
 3. The rest is driven from the Mac over SSH (or from Git Bash on SERVER):
