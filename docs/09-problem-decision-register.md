@@ -66,7 +66,7 @@ IDs are `PD-xx`, chronological.
 | PD-35 | Claude Code through the gateway: env token wins over stored login, except when launched inside the desktop app | verified | 2026-10-20 |
 | PD-36 | No MinIO web console in current builds; Object Lock shown with the mc client | applied | 2026-10-20 |
 | PD-37 | Top-ups counted as negative consumption produced negative utilisation; now they enlarge the envelope | verified | 2026-10-20 |
-| PD-38 | The PoC was built by an ungoverned agent session with full operator privileges | open | 2026-10-20 |
+| PD-38 | The PoC was built by an ungoverned agent session with full operator privileges; observed again 2026-10-21 (settings installed, overridden by the desktop app) | open; PD-43 scope decision pending | 2026-10-20 |
 | PD-39 | Gate 1 turned on for this repository first; one human account limits what can be required | applied | 2026-10-20 |
 | PD-40 | parcel-app backend: PostgreSQL + PostgREST (Supabase core) per environment instead of the full self-host bundle | applied | 2026-10-20 |
 | PD-41 | No cloud account or spend in the PoC: an EU-region external model endpoint is out of scope; US-endpoint exception decision deferred (issue #19) | decided | 2026-10-21 |
@@ -430,7 +430,13 @@ IDs are `PD-xx`, chronological.
 **Decision.** (c) now; (b) for any work touching a non-synthetic repository. Rotate the SERVER `.env` passwords before the stack holds anything but demo data. Add "desktop-app sessions bypass the gateway" to the AI Acceptable Use Policy draft and to the vendor assessment of the desktop app.
 **Pros.** Honest record; the register can be shown to an auditor as written by the process it describes. **Cons.** The PoC's own provenance does not meet the PoC's own bar.
 **Applied in.** This entry; the AUP line is in docs/10 §4 (draft). Password rotation stays open until the stack holds anything but demo data.
-**Status.** open (owner: CISO; rotation before real data).
+**Observed 2026-10-21 (issue #18).** The managed settings are installed on the Mac (`/Library/Application Support/ClaudeCode/managed-settings.json`, `ANTHROPIC_BASE_URL` = the gateway), yet a desktop-app session's own environment has `ANTHROPIC_BASE_URL=https://api.anthropic.com`: the app overrides the setting, so every turn and every file the session reads is processed by the provider in the US. The permission part of the same file appears to apply: `docker` commands were refused in that session, consistent with the `Bash(docker *)` deny rule (not confirmed as the source). The installed file predates PD-43 and lacks `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`; the owner reinstalls it from `deploy/server/managed-settings.json`.
+Against the project's rules, the sessions currently stand as follows.
+- **Respected:** PR only, owner merges (the assistant declined twice), a ticket on every PR, secret scanning in CI, AI trailer, label and checklist, numbered decisions. No secrets were handled that day, and SERVER access was refused by the permission layer.
+- **Not met:** G2 and PD-43, since processing is in the US. G3: no DLP or classification. G6: no event in the hash chain; the trace is commit trailers, PRs and the app's local transcripts, which are not WORM. G7: not metered and no recorded cost approval; parallel sessions and subagents multiply the spend. G9: plugins and MCP servers sit outside any allowlist. AUP "one door" holds only through its synthetic-material clause, and the PD-07 line is not met, because the sessions run in a shell that can reach SERVER. Test-first is partial (tests written first, run only in CI). The "independent review" is a subagent of the same model and vendor, so it is not independent.
+- **Partly met:** G5. Sessions act under the owner's GitHub account, so an AI push differs from the owner's only by its trailer.
+**Scope with PD-43 (open, owner).** PD-43 rules that everything stays in the EU, while these sessions process in the US. Whether the build tooling is inside or outside that rule, and under which option, is left to the owner. The options are: keep the desktop app with a dated, recorded exclusion; use terminal `claude` through the gateway on the self-hosted model; use an EU-region provider (needs spend, PD-41); or use the SERVER sandbox with a delegated identity.
+**Status.** open (owner: CISO; rotation before real data; PD-43 scope decision pending).
 
 ## PD-39 — This repository governs its own changes first
 
