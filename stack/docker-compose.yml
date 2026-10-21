@@ -5,7 +5,7 @@ name: agl
 networks:
   agl-net:
     internal: true          # no route out and no published ports: reachable only via caddy; outbound only via egress-proxy
-  egress-net: {}            # egress-proxy's way out
+  egress-net: {}            # egress-proxy's way out; unused since PD-43
   edge-net: {}              # caddy + coredns, published on BIND_IP
 
 volumes:
@@ -87,7 +87,9 @@ services:
   egress-proxy:
     image: ubuntu/squid:6.6-24.04_beta
     volumes: [./proxy/squid.conf:/etc/squid/squid.conf:ro]
-    networks: [agl-net, egress-net]   # the ONLY service on both networks
+    # EU only, no exception (PD-43): no way out at all. The proxy stays on agl-net (deny all, every attempt
+    # logged) but is detached from egress-net; re-attach only together with an approved EU provider host.
+    networks: [agl-net]
 
   mock-model:
     build: ./mock-model

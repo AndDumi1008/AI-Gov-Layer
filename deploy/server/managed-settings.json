@@ -5,7 +5,8 @@
     "ANTHROPIC_AUTH_TOKEN": "<JWT>",
     "ANTHROPIC_MODEL": "claude-sonnet-4-5",
     "NODE_EXTRA_CA_CERTS": "/Users/<you>/Projects/AI-Gov-Layer/evidence/agl-root.crt",
-    "DISABLE_TELEMETRY": "1"
+    "DISABLE_TELEMETRY": "1",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"
   },
   "permissions": {
     "deny": [

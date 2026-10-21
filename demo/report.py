@@ -7,7 +7,8 @@ MAP = {  # scenario → (proof, control it demonstrates, ISO 27001:2022 Annex A)
  "S2a": ("PR-3 EU only / privacy", "Personal data redacted before the prompt leaves; model sees placeholders", "A.5.34, A.8.12"),
  "S2b": ("PR-3", "Model-side view shows placeholders (mock tier only)", "A.8.12"),
  "S3":  ("Data leakage", "Credential pattern blocks the request; security notified", "A.8.12, A.5.24"),
- "S4":  ("PR-3 EU only", "CONFIDENTIAL automatically rerouted to the self-hosted tier", "A.5.12, A.5.23"),
+ "S4a": ("PR-3 EU only", "CONFIDENTIAL with Claude Code's model name served by the self-hosted tier", "A.5.12, A.5.23"),
+ "S4b": ("PR-3 EU only", "The response itself names agl/code-local", "A.5.23"),
  "S5":  ("PR-3 EU only", "CONFIDENTIAL allowed on the self-hosted tier", "A.5.12"),
  "S6":  ("PR-1 Quarantine", "RESTRICTED never reaches any model", "A.5.12, A.8.3"),
  "S7":  ("Registry", "Only registered model aliases are routable", "A.5.9, A.5.19"),
@@ -29,7 +30,11 @@ MAP = {  # scenario → (proof, control it demonstrates, ISO 27001:2022 Annex A)
  "S22b":("PR-1 Quarantine", "Prompt allowed after sign-off", "A.8.4"),
  "S23a":("PR-1 Quarantine", "A failed gate item re-quarantines automatically", "A.8.4, A.8.31"),
  "S23b":("PR-1 Quarantine", "Prompt blocked again", "A.8.4"),
- "S25": ("PR-3 EU only", "Non-EU host unreachable at the network layer", "A.8.20, A.8.22"),
+ "S25a":("PR-3 EU only", "Non-EU host unreachable at the network layer", "A.8.20, A.8.22"),
+ "S25b":("PR-3 EU only", "The formerly allowed US provider host is unreachable too", "A.8.20, A.8.22"),
+ "S27": ("PR-3 EU only", "The revoked US endpoint is refused by name; no exception applies", "A.5.23, A.5.31"),
+ "S28": ("PR-3 EU only", "A non-EU endpoint cannot be registered even as evaluating", "A.5.23, A.5.31"),
+ "S29": ("PR-3 EU only", "Self-hosted model down: the request fails, nothing falls back to another model", "A.5.23, A.8.14"),
  "S26": ("Policy as code", "Policy bundle unit tests pass", "A.8.9, A.8.25"),
 }
 
@@ -82,13 +87,13 @@ th{{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut
 <table><tr><th>Proof</th><th>Statement</th><th>Scenarios</th></tr>
 <tr><td><b>PR-1 Quarantine</b></td><td>A repository is not exposed to AI until its gate items are met and two people sign off; it closes again automatically.</td><td class=mono>S6 S19–S23</td></tr>
 <tr><td><b>PR-2 Total budget</b></td><td>Org and team envelopes are hard caps; re-opening needs a second person.</td><td class=mono>S8 S9</td></tr>
-<tr><td><b>PR-3 EU only</b></td><td>Non-EU endpoints cannot be registered or reached; CONFIDENTIAL work stays on the self-hosted tier; personal data is redacted before any call.</td><td class=mono>S2 S4 S5 S14 S25</td></tr>
+<tr><td><b>PR-3 EU only</b></td><td>Non-EU endpoints cannot be registered or reached; CONFIDENTIAL work stays on the self-hosted tier; personal data is redacted before any call.</td><td class=mono>S2 S4 S5 S14 S25 S27 S28 S29</td></tr>
 <tr><td><b>PR-4 Immutable</b></td><td>Audit records cannot be altered or deleted, by anyone, and tampering is detectable.</td><td class=mono>S10–S12</td></tr></table>
 <h2>Scenario results</h2>
 <table><tr><th>ID</th><th>What was demonstrated</th><th>Proof</th><th>ISO 27001 Annex A</th><th>Result</th></tr>{trs}</table>
 <h2>Audit chain verification</h2>{chain_html}
 <h2>Stand-ins in this PoC</h2>
-<p class=muted>Dev token issuer instead of the corporate IdP · MinIO Object Lock instead of EU cloud object storage · regex DLP instead of Presidio · Anthropic direct API under a 72-hour dual-approved exception instead of an EU-region endpoint · one gateway instance. Production replacements are listed in docs/07 §7.</p>
+<p class=muted>Dev token issuer instead of the corporate IdP · MinIO Object Lock instead of EU cloud object storage · regex DLP instead of Presidio · self-hosted model only, no external tier (EU only, no exception: PD-43) instead of an EU-region provider endpoint · one gateway instance. Production replacements are listed in docs/07 §7.</p>
 """)
 
 if __name__ == "__main__":

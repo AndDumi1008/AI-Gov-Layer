@@ -71,6 +71,7 @@ IDs are `PD-xx`, chronological.
 | PD-40 | parcel-app backend: PostgreSQL + PostgREST (Supabase core) per environment instead of the full self-host bundle | applied | 2026-10-20 |
 | PD-41 | No cloud account or spend in the PoC: an EU-region external model endpoint is out of scope; US-endpoint exception decision deferred (issue #19) | decided | 2026-10-21 |
 | PD-42 | GitHub Issues is the ticket system; every PR must reference an issue, enforced by the `ticket` check | applied | 2026-10-21 |
+| PD-43 | EU only, no exception: the US endpoint is revoked, all model work runs on the self-hosted tier (issue #19) | decided; applied in repo, not on SERVER | 2026-10-21 |
 
 ---
 
@@ -448,7 +449,7 @@ IDs are `PD-xx`, chronological.
 ## PD-41 — No money in the PoC: the EU-region external endpoint is out of scope
 
 **Problem.** The audit (docs/11, gap 1) ranks the US Anthropic endpoint under exception as the first thing to fix for guardrails G2 and G8. Closing it needs an EU-region provider endpoint (Bedrock or Vertex AI in an EU region), which needs a cloud account and incurs spend.
-**Decision (owner, 2026-10-21).** The PoC runs with no cloud account and no money. The EU-region endpoint is therefore out of scope for the replica and becomes a transfer-time item for the client's own accounts. Whether to keep the US exception for demos or revoke it and run INTERNAL work on the self-hosted tier only is deferred; tracked as issue #19, assigned to the owner, to be decided before the demo runbook is finalised.
+**Decision (owner, 2026-10-21).** The PoC runs with no cloud account and no money. The EU-region endpoint is therefore out of scope for the replica and becomes a transfer-time item for the client's own accounts. Whether to keep the US exception for demos or revoke it and run INTERNAL work on the self-hosted tier only is deferred; tracked as issue #19, assigned to the owner, to be decided before the demo runbook is finalised. Decided the same day in PD-43: revoked, no exception.
 **Pros.** Honest scope; the registry already proves the mechanism (an approved non-EU endpoint cannot exist). **Cons.** The two Highest guardrails cannot be shown fully closed in the replica; the demo Q&A must say so.
 **Status.** decided.
 
@@ -458,6 +459,19 @@ IDs are `PD-xx`, chronological.
 **Decision (owner, 2026-10-21).** GitHub Issues on both repositories. One issue per ranked gap (#6–#18) and one decision issue (#19). A `ticket` job in both CI workflows fails a PR whose title or description does not reference an issue (`#n` or `owner/repo#n`), and the rulesets require it. The PR template carries a `Ticket:` line.
 **Pros.** Zero cost; the reference is enforced, not requested. **Cons.** A reference is not a justification; review still has to check that the PR does what the issue says.
 **Status.** applied.
+
+## PD-43 — EU only, no exception: the US endpoint is revoked
+
+**Problem.** Issue #19 (from PD-41): keep or revoke the 72-hour `model_enable` exception that let the replica send INTERNAL work to the provider's US endpoint. It contradicted G2 and G8 (docs/11 gap 1), and `demo-reset` renewed it on every reset, so in practice it never expired.
+**Fixes considered.** (a) Keep it for demos and disclose it in Q&A. (b) Revoke it and run all model work on the self-hosted tier. (c) Revoke it and add a declared EU stand-in tier (the mock on SERVER) so that reroute, ceiling and exception paths keep end-to-end scenarios.
+**Thought process.** (a) asks the client's PO to accept the very thing the highest guardrail forbids. (c) keeps better demo coverage but adds a tier that exists only to be shown. (b) is the honest floor; (c) can be added later if the owner wants it.
+**Decision (owner, 2026-10-21).** (b): "No exception. Everything must stay in the EU." Applied as: the exception closed and every non-EU endpoint revoked (`stack/schema/020_eu_only.sql`); the schema admits a non-EU endpoint only as `revoked`; policy blocks `NON_EU_ENDPOINT` before status or exceptions are read, and no exception applies to a non-EU endpoint; the gateway has no external adapter and its default alias is `code-local`; the egress allowlist is empty and the proxy is detached from `egress-net`; `demo-reset` no longer touches exceptions; the self-hosted tier carries a placeholder internal chargeback (1.00 / 5.00 EUR per 1M input/output tokens), because at 0 EUR the budget guardrail would bound nothing; Claude Code's managed settings disable non-essential traffic. New checks: S4b (the response names `agl/code-local`), and the negatives S25b, S27, S28 and S29 (self-hosted model stopped → `BACKEND_ERROR`, no fallback); the CI schema job checks the registry side. S29 found that an unreachable backend raised an unhandled error (500, budget reservation left open); it is now a `BackendError` (502, reservation released).
+**Pros.** G2's open violation is gone and three independent layers refuse it (schema, policy, network). No external spend. G8 holds for every call (the self-hosted tier retains nothing).
+**Cons.** Claude Code through the gateway now runs on the 7B local model, which is much weaker. Reroute, `CLASSIFICATION_CEILING` and the `model_enable` path are covered by OPA unit tests only, with no end-to-end scenario (option c would restore that). S4 is now close to S5: it proves the default path, not a reroute. The chargeback rate is a placeholder, not a measured cost.
+**Scope (open, asked of the owner).** Applied to governed model inference. Still outside the EU or under US jurisdiction: GitHub.com and GitHub-hosted runners (PD-39), Tailscale coordination, public image and package registries (gap 8, #13), the Claude desktop app (PD-38), and the AI assistant used to build this PoC. `eu_residency` means processing location: `EU_REGION_HYPERSCALER` providers have US parents, which a jurisdiction reading of "EU only" would exclude (provider `parent_country` is not yet a policy input). Vercel is no longer used (owner, 2026-10-21); the PaaS pipeline examples and docs/07 §10.6 still describe it and need their own change.
+**Open.** (1) The revocation is SQL, so the hash chain has no `registry_change` event for it (the G9 gap); a gateway admin path that appends one should run on SERVER together with the migration. (2) Look back: count what was sent under the exception on SERVER (`select count(*), min(ts), max(ts) from audit_event where type = 'completion' and model_endpoint_id = '00000000-0000-0000-0000-000000000402'`) and record it here; the provider row says `zero_retention = false`, so decide whether to request deletion (all data was synthetic). (3) Owner: remove `ANTHROPIC_API_KEY` from SERVER's `stack/.env` and revoke the key in the provider console. (4) Owner: apply on SERVER (020 migration, rebuild `gateway` and `egress-proxy`, `make demo-server`). (5) docs/07 §10.5 says a Mac firewall or exit-node rule blocks the provider host; nothing in the repository sets one.
+**Applied in.** Branch `policy/eu-only` (issue #19).
+**Status.** decided; applied in the repository, not yet on SERVER.
 
 ---
 

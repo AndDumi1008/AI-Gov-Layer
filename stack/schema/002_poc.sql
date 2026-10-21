@@ -6,6 +6,7 @@ create unique index on audit_event (seq);
 
 -- 2. Non-EU endpoints may exist only while 'evaluating' (used under a logged exception);
 --    they can never become approved/restricted (see docs/07 §10.5 residency note).
+--    Superseded by 020_eu_only.sql (PD-43): a non-EU endpoint may exist only as 'revoked'.
 alter type residency_class add value if not exists 'NON_EU_EVALUATING';
 alter table model_endpoint drop constraint model_endpoint_region_country_check;
 alter table model_endpoint add constraint model_endpoint_region_country_check check (

@@ -36,7 +36,7 @@ Changes reach `main` only through a pull request that passes the seven checks in
 
 ```
 make bootstrap    # stack/ with the mock model; .env from .env.example
-make demo         # 28 scenario checks → evidence/
+make demo         # 33 scenario checks → evidence/
 make test         # policy + gateway unit tests
 ```
 

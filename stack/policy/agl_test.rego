@@ -76,13 +76,44 @@ test_evaluating_model_blocked_without_exception if {
   "MODEL_NOT_APPROVED" in d.reasons
 }
 
-test_evaluating_model_allowed_with_exception if {
+# An EU endpoint under evaluation may be used under a model_enable exception (F-09).
+test_evaluating_eu_model_allowed_with_exception if {
   d := agl.decision with input as object.union(base, {
-    "model": {"alias": "code-default", "status": "evaluating", "ceiling": "INTERNAL", "residency": "NON_EU_EVALUATING"},
+    "model": {"alias": "code-default", "status": "evaluating", "ceiling": "INTERNAL", "residency": "EU_REGION_HYPERSCALER"},
     "exceptions": [{"id": "exc-1", "type": "model_enable", "scope": {"model_alias": "code-default"}}]})
   d.outcome == "allow"
   d.exception_id == "exc-1"
   "EXCEPTION_APPLIED" in d.reasons
+}
+
+# EU only, no exception (PD-43): a non-EU endpoint is refused whatever its status or exceptions.
+test_non_eu_endpoint_blocked_even_with_exception if {
+  d := agl.decision with input as object.union(base, {
+    "model": {"alias": "code-default", "status": "evaluating", "ceiling": "INTERNAL", "residency": "NON_EU_EVALUATING"},
+    "exceptions": [{"id": "exc-1", "type": "model_enable", "scope": {"model_alias": "code-default"}}]})
+  d.outcome == "block"
+  "NON_EU_ENDPOINT" in d.reasons
+  not "EXCEPTION_APPLIED" in d.reasons
+  d.exception_id == null
+}
+
+test_non_eu_endpoint_blocked_even_if_approved if {
+  d := agl.decision with input as object.union(base, {"model": {"alias": "us-direct", "status": "approved", "ceiling": "INTERNAL", "residency": "NON_EU_EVALUATING"}})
+  d.outcome == "block"
+  "NON_EU_ENDPOINT" in d.reasons
+}
+
+test_unknown_residency_blocked if {
+  d := agl.decision with input as object.union(base, {"model": {"alias": "nobody-knows", "status": "unknown", "ceiling": "PUBLIC", "residency": "none"}})
+  "NON_EU_ENDPOINT" in d.reasons
+}
+
+test_reroute_target_must_be_eu if {
+  d := agl.decision with input as object.union(base, {
+    "classification": "CONFIDENTIAL",
+    "local_model": {"alias": "code-local", "status": "approved", "ceiling": "CONFIDENTIAL", "residency": "NON_EU_EVALUATING"}})
+  d.outcome == "block"
+  "NON_EU_ENDPOINT" in d.reasons
 }
 
 test_training_required if {

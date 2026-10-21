@@ -26,19 +26,19 @@ EV1=$(echo "$r" | grep -o '"X-AGL-Event": "[^"]*"' | cut -d'"' -f4)
 
 say "S2  two emails in prompt → redact, model saw placeholders"
 r=$(as dana ask "Email ana.popescu@example.ro and jonas.weber@example.de about the parcel." -c INTERNAL); echo "$r" >> "$LOG"; check S2a 'PII_REDACTED' "$r"
-EXT=$(grep -E '^AGL_EXTERNAL_BACKEND=' "$ENV_FILE" | cut -d= -f2)
-if [ "$EXT" = "mock" ] && docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^agl-mock-model-1$'; then
+BACKEND=$(grep -E '^AGL_LOCAL_BACKEND_URL=' "$ENV_FILE" | cut -d= -f2); BACKEND=${BACKEND:-http://mock-model:8000}
+if echo "$BACKEND" | grep -q mock-model && docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^agl-mock-model-1$'; then
   seen=$(docker exec agl-mock-model-1 python3 -c "import urllib.request,json;print(json.load(urllib.request.urlopen('http://localhost:8000/debug/last'))['prompt'])" 2>/dev/null || echo "n/a")
   echo "model saw: $seen" >> "$LOG"; check S2b '\[EMAIL_1\]' "$seen"
 else
-  echo "   SKIP S2b (external tier is '$EXT' / mock not local: the model-side view is only inspectable on the mock; the redaction itself is proven by S2a and the response headers)" | tee -a "$LOG"
+  echo "   SKIP S2b (model backend is '$BACKEND' / mock not local: the model-side view is only inspectable on the mock; the redaction itself is proven by S2a and the response headers)" | tee -a "$LOG"
 fi
 
 say "S3  AWS key in prompt → block SECRET_DETECTED"
 r=$(as dana ask "Why does AKIAABCDEFGHIJKLMNOP fail with 403?" -c INTERNAL); echo "$r" >> "$LOG"; check S3 'SECRET_DETECTED' "$r"
 
-say "S4  CONFIDENTIAL to the external model → rerouted to code-local"
-r=$(as dana ask "Review this payment reconciliation logic." -c CONFIDENTIAL); echo "$r" >> "$LOG"; check S4 '"X-AGL-Rerouted": "code-local"' "$r"
+say "S4  CONFIDENTIAL with the model name Claude Code sends → served by code-local, nothing leaves the EU"
+r=$(as dana ask "Review this payment reconciliation logic." -c CONFIDENTIAL --model claude-sonnet-4-5); echo "$r" >> "$LOG"; check S4a '"X-AGL-Model": "code-local"' "$r"; check S4b '"model": "agl/code-local"' "$r"
 
 say "S5  CONFIDENTIAL directly to code-local → allow"
 r=$(as dana ask "Review this payment reconciliation logic." -c CONFIDENTIAL --model code-local); echo "$r" >> "$LOG"; check S5 '"X-AGL-Decision": "allow"' "$r"
@@ -50,7 +50,7 @@ say "S7  unknown model alias → falls back to default alias (documented) / unap
 r=$(as dana ask "hello" --model totally-unknown-model -c INTERNAL); echo "$r" >> "$LOG"; check S7 'X-AGL-Model' "$r"
 
 say "S8  team 'payments' envelope is tiny (0.01 EUR) → warning then BUDGET_EXHAUSTED"
-last=""; for i in $(seq 1 15); do last=$(as sven ask "Generate a 200-word summary of parcel handling rules, iteration $i. $(printf 'x%.0s' $(seq 1 1500))" -c INTERNAL); echo "$last" | grep -q BUDGET_EXHAUSTED && break; done
+last=""; for i in $(seq 1 30); do last=$(as sven ask "Generate a 200-word summary of parcel handling rules, iteration $i. $(printf 'x%.0s' $(seq 1 1500))" -c INTERNAL); echo "$last" | grep -q BUDGET_EXHAUSTED && break; done
 echo "$last" >> "$LOG"; check S8 'BUDGET_EXHAUSTED' "$last"
 
 say "S9  team lead requests top-up, budget owner approves (≠ requester) → requests succeed"
@@ -87,6 +87,12 @@ r=$(as dana ask "hello again" -c INTERNAL); echo "$r" >> "$LOG"; check S13b '"X-
 say "S14 register an approved endpoint in a non-EU region → rejected by schema"
 r=$($PSQL -c "insert into model_endpoint(model_id,alias,base_url,region,region_country,residency,status,classification_ceiling,secret_ref) select id,'us-direct','https://x','us-east-1','US','EU_REGION_HYPERSCALER','approved','INTERNAL','none' from model limit 1;" 2>&1); echo "$r" >> "$LOG"; check S14 'violates check constraint' "$r"
 
+say "S27 ask for the revoked US endpoint by name → block NON_EU_ENDPOINT, no exception applies"
+r=$(as dana ask "hello" --model code-default -c INTERNAL); echo "$r" >> "$LOG"; check S27 'NON_EU_ENDPOINT' "$r"
+
+say "S28 register a non-EU endpoint as evaluating (the old exception path) → rejected by schema"
+r=$($PSQL -c "insert into model_endpoint(model_id,alias,base_url,region,region_country,residency,status,classification_ceiling,secret_ref) select id,'us-eval','https://x','us-east-1','US','NON_EU_EVALUATING','evaluating','INTERNAL','none' from model limit 1;" 2>&1); echo "$r" >> "$LOG"; check S28 'violates check constraint' "$r"
+
 say "S19 prompt with quarantined repo context → REPO_QUARANTINED (lists open gate items)"
 r=$(as dana ask "Fix the bug in app-x" -r shortandsweet/app-x); echo "$r" >> "$LOG"; check S19 'REPO_QUARANTINED' "$r"
 
@@ -107,16 +113,24 @@ say "S23 a prod-derived dataset gets attached / gate item flips false → back t
 r=$(as ines repo gate shortandsweet/app-x no_prod_data false); echo "$r" >> "$LOG"; check S23a '"requarantined": true' "$r"
 r=$(as dana ask "Fix the bug in app-x" -r shortandsweet/app-x); echo "$r" >> "$LOG"; check S23b 'REPO_QUARANTINED' "$r"
 
-say "S25 from inside the gateway network, call a non-EU host → egress refused"
+say "S25 from inside the gateway network, call non-EU hosts (incl. the formerly allowed api.anthropic.com) → egress refused"
+for h in a:api.openai.com b:api.anthropic.com; do
 r=$(docker exec agl-gateway-1 python3 -c "
 import httpx
 try:
-    r=httpx.get('https://api.openai.com/v1/models',timeout=8); print('HTTP',r.status_code)
-except Exception as e: print('REFUSED',type(e).__name__,str(e)[:120])" 2>&1); echo "$r" >> "$LOG"; check S25 'REFUSED\|HTTP 403' "$r"
+    r=httpx.get('https://${h#*:}/v1/models',timeout=8); print('HTTP',r.status_code)
+except Exception as e: print('REFUSED',type(e).__name__,str(e)[:120])" 2>&1); echo "$r" >> "$LOG"; check "S25${h%%:*}" 'REFUSED\|HTTP 403' "$r"
+done
 
 say "S26 policy replay: 1000 synthetic decisions, count any non-EU route"
 # static policy test on the engine in use; the bind mount must be a path on THAT host (SERVER run: AGL_POLICY_PATH=D:/Projects/AI-Gov-Layer/stack/policy)
 r=$(docker run --rm -v "${AGL_POLICY_PATH:-$PWD/stack/policy}:/policy:ro" openpolicyagent/opa:1.4.2-static test /policy 2>&1 | tail -1); echo "$r" >> "$LOG"; check S26 'PASS' "$r"
+
+say "S29 stop the self-hosted model → BACKEND_ERROR, no fallback to any other model"
+SVC=$(echo "$BACKEND" | grep -q ollama && echo ollama || echo mock-model)
+docker compose -f stack/docker-compose.yml stop "$SVC" >/dev/null 2>&1; sleep 2
+r=$(as dana ask "hello while the model is down" --model claude-sonnet-4-5 -c INTERNAL); echo "$r" >> "$LOG"; check S29 'BACKEND_ERROR' "$r"
+docker compose -f stack/docker-compose.yml start "$SVC" >/dev/null 2>&1; sleep 3
 
 echo -e "\n== $pass passed, $fail failed. Evidence in $EV" | tee -a "$LOG"
 as ines events --limit 5 > "$EV/last-events.json" 2>/dev/null; as ines audit verify > "$EV/chain-verification.json" 2>/dev/null

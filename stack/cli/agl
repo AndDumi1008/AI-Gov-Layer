@@ -52,7 +52,7 @@ def main():
     sub = p.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("login", help="PoC: mint a dev token for a seeded user"); s.add_argument("--as", dest="user", required=True)
     sub.add_parser("whoami"); sub.add_parser("models"); sub.add_parser("budget"); sub.add_parser("datasets")
-    s = sub.add_parser("ask", help="send a prompt through the gateway"); s.add_argument("prompt"); s.add_argument("--model", default="code-default")
+    s = sub.add_parser("ask", help="send a prompt through the gateway"); s.add_argument("prompt"); s.add_argument("--model", default="code-local")
     s.add_argument("--classification", "-c"); s.add_argument("--repo", "-r"); s.add_argument("--surface", choices=["openai", "anthropic"], default="openai"); s.add_argument("--stream", action="store_true")
     s = sub.add_parser("why", help="explain a decision"); s.add_argument("event_id")
     s = sub.add_parser("events"); s.add_argument("--limit", type=int, default=20); s.add_argument("--type")
