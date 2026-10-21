@@ -193,7 +193,7 @@ def main():
             st, h, b = call("POST", "/agl/scm/reconcile", {"repo": repo, "records": recs})
             if st >= 400: out(st, b)
             results.append(b); overall = b["result"] if b["result"] == "fail" else overall
-            print(f"{repo}: {b['result']} · imported {b['imported']} · matched {b['matched']} · mismatches {len(b['mismatches'])} · gates red {len(b['gates_not_green'])} · gates not reported (historical) {len(b.get('gates_not_reported', []))} · self-merged {b['self_merged']}")
+            print(f"{repo}: {b['result']} · imported {b['imported']} · completed {b.get('completed', 0)} · matched {b['matched']} · mismatches {len(b['mismatches'])} · gates red {len(b['gates_not_green'])} · gates not reported (historical) {len(b.get('gates_not_reported', []))} · self-merged {b['self_merged']}")
             for g in b.get("gates_not_reported", []): print("   not reported", json.dumps(g))
             for m in b["mismatches"]: print("   MISMATCH", json.dumps(m))
             for g in b["gates_not_green"]: print("   GATE NOT GREEN", json.dumps(g))

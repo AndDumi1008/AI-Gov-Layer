@@ -25,6 +25,33 @@ def test_gates_and_self_merge_flags():
     assert [g["merge_commit"] for g in r["gates_not_reported"]] == ["z"]
     assert [s["merge_commit"] for s in r["self_merged"]] == ["y"]
 
+def run(id_, conclusion):
+    return {"id": id_, "conclusion": conclusion, "name": "ci"}
+
+def test_post_merge_run_still_running_at_import_is_completed_not_mismatched():
+    # gh reports conclusion "" while a run is in progress; the same run finishing later is a completion (#7)
+    r = scm.compare({"m1": rec("m1", post_merge_run=run(7, ""))}, [rec("m1", post_merge_run=run(7, "success"))])
+    assert r["mismatches"] == [] and r["completions"] == ["m1"] and [x["merge_commit"] for x in r["imports"]] == ["m1"]
+
+def test_post_merge_run_not_yet_listed_at_import_is_completed():
+    r = scm.compare({"m1": rec("m1", post_merge_run=None)}, [rec("m1", post_merge_run=run(7, "success"))])
+    assert r["mismatches"] == [] and r["completions"] == ["m1"]
+
+def test_still_running_on_both_sides_is_a_match():
+    r = scm.compare({"m1": rec("m1", post_merge_run=run(7, ""))}, [rec("m1", post_merge_run=run(7, ""))])
+    assert r["matches"] == ["m1"] and r["completions"] == [] and r["imports"] == []
+
+def test_changed_final_conclusion_or_other_run_is_still_a_mismatch():
+    # a recorded outcome that changes (a re-run after failure) or a different run is evidence, not completion
+    r = scm.compare({"m1": rec("m1", post_merge_run=run(7, "failure"))}, [rec("m1", post_merge_run=run(7, "success"))])
+    assert [m["kind"] for m in r["mismatches"]] == ["changed"] and r["completions"] == []
+    r = scm.compare({"m1": rec("m1", post_merge_run=run(7, ""))}, [rec("m1", post_merge_run=run(8, "success"))])
+    assert [m["kind"] for m in r["mismatches"]] == ["changed"] and r["completions"] == []
+
+def test_completion_does_not_hide_another_change():
+    r = scm.compare({"m1": rec("m1", post_merge_run=run(7, ""))}, [rec("m1", post_merge_run=run(7, "success"), merged_by="c")])
+    assert [m["kind"] for m in r["mismatches"]] == ["changed"] and r["completions"] == [] and r["imports"] == []
+
 def test_old_record_version_is_reimported_not_mismatched():
     old = rec("m1"); old.pop("gates_red"); old.pop("gates_not_reported"); old.pop("record_version")   # stored by the v1 collector
     r = scm.compare({"m1": old}, [rec("m1")])
