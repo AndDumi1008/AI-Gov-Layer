@@ -8,7 +8,12 @@ rank := {"PUBLIC": 0, "INTERNAL": 1, "CONFIDENTIAL": 2, "RESTRICTED": 3}
 
 local_alias := data.agl.config.local_alias
 
+# EU only, no exception (PD-43): any other residency, or none, is refused before status or exceptions are read.
+eu_residency := {"EU_SELF_HOSTED", "EU_PROVIDER_ZERO_RETENTION", "EU_REGION_HYPERSCALER"}
+
 # ---- hard blocks (any one is enough)
+block_reasons contains "NON_EU_ENDPOINT" if not input.model.residency in eu_residency
+block_reasons contains "NON_EU_ENDPOINT" if { reroute_needed; input.local_model; not input.local_model.residency in eu_residency }
 block_reasons contains "IDENTITY_SUSPENDED" if input.identity.status != "active"
 block_reasons contains "TRAINING_REQUIRED" if not input.identity.training_completed
 block_reasons contains "DELEGATION_EXPIRED" if { input.identity.kind == "agent"; input.identity.delegation_valid == false }
@@ -24,11 +29,11 @@ block_reasons contains "CLASSIFICATION_CEILING" if { reroute_needed; rank[input.
 block_reasons contains "LOCAL_MODEL_UNAVAILABLE" if { reroute_needed; not input.local_model }
 block_reasons contains "PRODUCTION_CALLER" if input.client.environment == "production"
 
-# A model is usable when approved/restricted, or evaluating under an active model_enable exception.
+# A model is usable when approved/restricted, or an EU endpoint evaluating under an active model_enable exception.
 model_usable if input.model.status in {"approved", "restricted"}
-model_usable if { input.model.status == "evaluating"; some e in input.exceptions; e.type == "model_enable"; e.scope.model_alias == input.model.alias }
+model_usable if count(exception_applied) > 0
 
-exception_applied contains e.id if { input.model.status == "evaluating"; some e in input.exceptions; e.type == "model_enable"; e.scope.model_alias == input.model.alias }
+exception_applied contains e.id if { input.model.status == "evaluating"; input.model.residency in eu_residency; some e in input.exceptions; e.type == "model_enable"; e.scope.model_alias == input.model.alias }
 
 # ---- reroute: CONFIDENTIAL never leaves the self-hosted tier
 reroute_needed if { input.classification == "CONFIDENTIAL"; input.model.residency != "EU_SELF_HOSTED" }

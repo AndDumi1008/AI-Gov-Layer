@@ -632,7 +632,7 @@ The PoC migration changes four things relative to the DDL above; fold them into 
 
 - `identity_role`: composite primary key replaced by a unique index on `(identity_id, role, coalesce(scope_team, '00000000-…'))` so org-wide roles can have `scope_team = null`.
 - `audit_event.seq bigint generated always as identity`: the chain order in the hot copy.
-- `model_endpoint` region check: `region_country in (EU/EEA/CH) OR status = 'evaluating'`; a non-EU endpoint can exist only while evaluating and only serves requests under an active `model_enable` exception. New `residency_class` value `NON_EU_EVALUATING`.
+- `model_endpoint` region check: `region_country in (EU/EEA/CH) OR status = 'evaluating'`; a non-EU endpoint can exist only while evaluating and only serves requests under an active `model_enable` exception. New `residency_class` value `NON_EU_EVALUATING`. **Tightened by `020_eu_only.sql` (PD-43):** `status = 'revoked' OR (region_country in EU/EEA/CH AND residency <> 'NON_EU_EVALUATING')`, so a non-EU endpoint exists only as revoked history.
 - `budget_state(scope, scope_id)` function for the gateway's real-time check; the materialized view remains for dashboards.
 - `audit_anchor`: `unique(anchor_date)` dropped, `anchored_through timestamptz` added; an anchor covers segments closed up to that time (PD-28).
 

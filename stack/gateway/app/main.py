@@ -14,6 +14,7 @@ MESSAGES = {
     "REPO_QUARANTINED": ("This repository is quarantined from AI until its gate items are satisfied and signed off (agl repo show <name>).", 403),
     "CLASSIFICATION_CEILING": ("The requested model is not approved for this data classification. Use a model with a higher ceiling (agl models).", 403),
     "MODEL_NOT_APPROVED": ("The requested model is not in the approved registry.", 404),
+    "NON_EU_ENDPOINT": ("The requested model is processed outside the EU. Only EU-resident endpoints may be used, and no exception can change that.", 403),
     "BUDGET_EXHAUSTED": ("The AI budget for this period is used up. A team lead can request a top-up: agl topup request <amount> \"<justification>\".", 402),
     "NO_TEAM_BUDGET": ("No budget envelope exists for your team; requests are blocked until a budget owner sets one.", 402),
     "IDENTITY_SUSPENDED": ("Your AI access is suspended. Contact security.", 403),
@@ -188,7 +189,7 @@ def handle(surface: str, body: dict, authorization, x_api_key, x_agl_classificat
         return err(surface, "GOVERNANCE_UNAVAILABLE", None, {"detail": f"audit unavailable: {str(e)[:120]}"})
 
     if decision["outcome"] == "block":
-        code = next((r for r in decision["reasons"] if r in MESSAGES), decision["reasons"][0] if decision["reasons"] else "BLOCKED")
+        code = "NON_EU_ENDPOINT" if "NON_EU_ENDPOINT" in decision["reasons"] else next((r for r in decision["reasons"] if r in MESSAGES), decision["reasons"][0] if decision["reasons"] else "BLOCKED")
         extra = {"reasons": decision["reasons"], "classification": classification}
         if code == "REPO_QUARANTINED" and repo:
             g = db.one("select * from repository_ai_gate where repository_id=%s", (repo["id"],))
@@ -495,10 +496,9 @@ def demo_reset(authorization: str | None = Header(None)):
     db.run("""update repository_ai_gate set no_prod_data=false, dpia_or_risk_ref=null, approver_security=null, approver_owner=null, approved_at=null, updated_at=now()
               where repository_id = (select id from repository where full_name='shortandsweet/app-x')""")
     db.run("update repository set ai_exposure='quarantined' where full_name='shortandsweet/app-x'")
-    # re-open the evaluation window from now (the check constraint caps ends_at at starts_at + 72 h)
-    db.run("update exception set starts_at = now(), ends_at = now() + interval '72 hours' where type='model_enable' and status='approved'")
+    # exceptions are not touched: the US endpoint's model_enable exception was closed for good (PD-43)
     ev = audit.chain.append("admin_action", {"action": "demo_reset", "by": i["subject"],
-                            "scope": ["budget_ledger", "topup_request", "delegated_identity", "repository_ai_gate:app-x", "exception:model_enable"],
+                            "scope": ["budget_ledger", "topup_request", "delegated_identity", "repository_ai_gate:app-x"],
                             "note": "control plane reset to seed state; audit chain not modified"}, actor_identity_id=i["id"], outcome="reset")
     return {"reset": True, "event_id": ev["event_id"], "audit_events_total": db.one("select count(*) as n from audit_event")["n"]}
 
