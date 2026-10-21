@@ -66,7 +66,9 @@ jobs:
       - name: Load migrations and seed
         run: |
           sudo apt-get install -y -q postgresql-client >/dev/null
-          for f in stack/schema/001_core.sql stack/schema/002_poc.sql stack/schema/010_seed.sql stack/schema/020_eu_only.sql; do psql -h localhost -U postgres -v ON_ERROR_STOP=1 -q -f "$f"; done
+          for f in stack/schema/001_core.sql stack/schema/002_poc.sql stack/schema/010_seed.sql stack/schema/020_eu_only.sql stack/schema/030_content_store.sql stack/schema/040_client.sql; do psql -h localhost -U postgres -v ON_ERROR_STOP=1 -q -f "$f"; done
+          # the migrations are idempotent: a second pass over a live database changes nothing and fails nowhere
+          for f in stack/schema/020_eu_only.sql stack/schema/030_content_store.sql stack/schema/040_client.sql; do psql -h localhost -U postgres -v ON_ERROR_STOP=1 -q -f "$f"; done
       - name: Constraints hold (append-only audit, EU only, quarantine guard)
         run: |
           set -e
@@ -78,6 +80,12 @@ jobs:
           [ "$(psql -h localhost -U postgres -tAc "select count(*) from exception where type='model_enable' and status='approved'")" = 0 ] || fail "a model_enable exception is still approved"
           grep -qE '^\s*acl\s+allowed_dst\b' stack/proxy/squid.conf && fail "egress allowlist is not empty"
           psql -h localhost -U postgres -c "update repository set ai_exposure='allowed' where full_name='shortandsweet/app-x';" 2>&1 | grep -q 'gate not satisfied' || fail "quarantine guard did not fire"
+          psql -h localhost -U postgres -v ON_ERROR_STOP=1 -qc "insert into content_record (id,event_id,kind,identity_id,team_id,key_id,prompt_cipher,prompt_sha256,expires_at) values ('00000000-0000-0000-0000-00000000c001',gen_random_uuid(),'completion','00000000-0000-0000-0000-000000000101','00000000-0000-0000-0000-000000000021','k','\\x01','sha256:x',now()+interval '30 days');"
+          psql -h localhost -U postgres -c "update content_record set prompt_cipher='\\x02' where id='00000000-0000-0000-0000-00000000c001';" 2>&1 | grep -q 'erased, not rewritten' || fail "a stored prompt could be rewritten"
+          psql -h localhost -U postgres -v ON_ERROR_STOP=1 -qc "update content_record set prompt_cipher=null, erased_at=now() where id='00000000-0000-0000-0000-00000000c001';"
+          psql -h localhost -U postgres -c "update content_record set prompt_cipher='\\x01' where id='00000000-0000-0000-0000-00000000c001';" 2>&1 | grep -q 'stays erased\|not rewritten' || fail "an erased record could be refilled"
+          [ "$(psql -h localhost -U postgres -tAc "select has_table_privilege('agl_gateway','content_record','DELETE')")" = f ] || fail "the gateway may delete content records"
+          [ "$(psql -h localhost -U postgres -tAc "select count(*) from identity_role r join identity i on i.id=r.identity_id where i.subject='carla' and r.role='client'")" = 1 ] || fail "the seeded client has no client role"
           echo "constraints OK"
 
   workflows-lint:

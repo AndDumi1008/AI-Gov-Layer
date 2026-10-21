@@ -20,10 +20,18 @@ test_allow_plain if {
   d.obligations.log_content == true
 }
 
-test_pii_redacts if {
+# Personal data is blocked, never redacted and sent (PD-49); a blocked request is not stored (PD-50).
+test_pii_blocks if {
   d := agl.decision with input as object.union(base, {"dlp": {"secrets": 0, "pii": 2}})
-  d.outcome == "redact"
-  "PII_REDACTED" in d.reasons
+  d.outcome == "block"
+  "PII_DETECTED" in d.reasons
+  d.obligations.log_content == false
+}
+
+# Exemptions are decided in the gateway and arrive as counts; only non-exempt matches reach dlp.pii.
+test_exempt_pii_allows if {
+  d := agl.decision with input as object.union(base, {"dlp": {"secrets": 0, "pii": 0, "exempt": {"own_identity": 1, "test_data": 2}}})
+  d.outcome == "allow"
 }
 
 test_secret_blocks if {
@@ -36,7 +44,7 @@ test_confidential_reroutes_to_local if {
   d := agl.decision with input as object.union(base, {"classification": "CONFIDENTIAL"})
   d.outcome == "reroute"
   d.reroute_to == "code-local"
-  d.obligations.log_content == false
+  d.obligations.log_content == true
 }
 
 test_confidential_on_local_allows if {
@@ -114,6 +122,48 @@ test_reroute_target_must_be_eu if {
     "local_model": {"alias": "code-local", "status": "approved", "ceiling": "CONFIDENTIAL", "residency": "NON_EU_EVALUATING"}})
   d.outcome == "block"
   "NON_EU_ENDPOINT" in d.reasons
+}
+
+# Every request that reaches a model is stored, CONFIDENTIAL included (PD-50).
+test_confidential_content_is_stored if {
+  d := agl.decision with input as object.union(base, {"classification": "CONFIDENTIAL", "model": base.local_model})
+  d.outcome == "allow"
+  d.obligations.log_content == true
+}
+
+# Clients ask product questions only (PD-51).
+client := object.union(base.identity, {"sub": "carla", "roles": ["client"]})
+
+test_client_free_prompt_blocked if {
+  d := agl.decision with input as object.union(base, {"identity": client, "request": {"mode": "model"}})
+  d.outcome == "block"
+  "CLIENT_SCOPE" in d.reasons
+}
+
+test_client_without_mode_blocked if {
+  d := agl.decision with input as object.union(base, {"identity": client})
+  "CLIENT_SCOPE" in d.reasons
+}
+
+test_client_product_question_allowed if {
+  d := agl.decision with input as object.union(base, {"identity": client, "request": {"mode": "product_qa"}})
+  d.outcome == "allow"
+  d.obligations.log_content == true
+}
+
+test_client_repo_context_blocked if {
+  d := agl.decision with input as object.union(base, {"identity": client, "request": {"mode": "product_qa"}, "repo": {"name": "booking-svc", "ai_exposure": "allowed"}})
+  "CLIENT_SCOPE" in d.reasons
+}
+
+test_client_who_is_developer_is_a_developer if {
+  d := agl.decision with input as object.union(base, {"identity": object.union(client, {"roles": ["client", "developer"]}), "request": {"mode": "model"}})
+  d.outcome == "allow"
+}
+
+test_developer_may_ask_product_questions if {
+  d := agl.decision with input as object.union(base, {"identity": object.union(base.identity, {"roles": ["developer"]}), "request": {"mode": "product_qa"}})
+  d.outcome == "allow"
 }
 
 test_training_required if {

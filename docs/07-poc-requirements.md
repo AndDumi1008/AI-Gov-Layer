@@ -45,7 +45,7 @@ If any gate item is later invalidated (for example a `prod-derived` dataset is t
 |------|----------|--------|
 | **Tier 1 (required)** | Gateway, policy engine, DLP, budget ledger, model registry, hash-chained WORM audit store, chain verifier, scripted demo | ~1 day |
 | **Tier 2 (optional)** | Demo repository with branch protection, AI-assisted labelling, CI gates, artifact signing, admission control, human-only production approval, one-page console | +2–3 days |
-| Out of scope | Sandbox orchestrator, Presidio-grade PII, real IdP, RFC 3161 timestamps, SIEM, content store, SaaS-AI inventory | Phase 1–3 |
+| Out of scope | Sandbox orchestrator, Presidio-grade PII, real IdP, RFC 3161 timestamps, SIEM, SaaS-AI inventory (the content store moved into scope on 2026-10-21, PD-50) | Phase 1–3 |
 
 ## 3. Prerequisites (what we need before starting)
 
@@ -84,8 +84,10 @@ If any gate item is later invalidated (for example a `prod-derived` dataset is t
 | P-01 | Gateway exposes an OpenAI-compatible `POST /v1/chat/completions` so any standard client or IDE plugin can be pointed at it by changing the base URL | T-GW-02 |
 | P-02 | Callers present a JWT from a local issuer carrying `sub`, `team`, `cost_centre`, `client_type`; no API keys accepted | T-GW-01 (stand-in for OIDC) |
 | P-03 | Model registry in Postgres with at least three entries: one `approved` EU self-hosted (local model), one `approved` EU provider (real or mock), one entry with a non-EU region that the schema check refuses to insert | T-REG-01, T-GW-10 |
-| P-04 | Policy engine (OPA, Rego bundle in Git) evaluates each request and returns allow / redact / block with reason codes and obligations | T-PE-01..03 |
-| P-05 | DLP detects at least: AWS/GitHub/generic API key patterns, email addresses, IBANs, and a configurable list of internal identifiers; redaction uses reversible placeholders restored on the response | T-DLP-01..03, 06 |
+| P-04 | Policy engine (OPA, Rego bundle in Git) evaluates each request and returns allow / block / reroute with reason codes and obligations | T-PE-01..03 |
+| P-05 | DLP detects at least: AWS/GitHub/generic API key patterns, email addresses, IBANs, and a configurable list of internal identifiers; personal data blocks the request (owner, 2026-10-21; PD-49), except the caller's own registered address and reserved test domains, which are counted | T-DLP-01..03, 06 |
+| P-22 | Content store: prompt and answer of every request that reaches a model, and every agent command with its output, encrypted per team, 30 days, read only with two people (one asks with a reason, a different one approves; audited), erased by the DPO (audited); no store, no request (PD-50) | T-CNT-01..04 |
+| P-23 | Client accounts ask product questions only, answered from the feature catalog and the latest verification run by the self-hosted model; any other client request is refused (PD-51) | D-13 |
 | P-06 | Budget ledger with team envelopes, reserve at request start, settle at completion, soft warning header at 80 %, hard block at 100 %, top-up via CLI command | T-BUD-01..05 |
 | P-07 | Every request, decision and budget event is written as a hash-chained JSON event (RFC 8785 canonical form, SHA-256) to an append-only Postgres table and to a MinIO bucket with Object Lock in compliance mode | T-AUD-01..04 |
 | P-08 | A `verify-chain` command re-hashes a date range, compares against stored anchors, and prints pass/fail per segment | T-AUD-06 |
@@ -110,7 +112,7 @@ The PoC is accepted when every scenario below produces the expected result in a 
 | # | Scenario | Expected |
 |---|----------|----------|
 | S1 | Developer in team `payments` sends a normal INTERNAL prompt to `code-default` | 200, response streamed, `request` + `completion` events chained, ledger settled |
-| S2 | Same prompt containing two email addresses | 200, response, `PII_REDACTED` reason, DLP event shows `EMAIL: 2`, model received placeholders |
+| S2 | Same prompt containing two email addresses of other people | 4xx `PII_DETECTED`, response lists `2 × EMAIL` without values, nothing forwarded (the mock shows it never received the prompt), nothing stored |
 | S3 | Prompt containing an AWS access key pattern | 4xx `SECRET_DETECTED`, nothing forwarded, remediation text, event id |
 | S4 | Request with header `x-classification: CONFIDENTIAL` to a model whose ceiling is INTERNAL | 4xx `CLASSIFICATION_CEILING`, message names an allowed model |
 | S5 | Same request to the EU zero-retention / self-hosted model | 200 |
@@ -135,6 +137,12 @@ The PoC is accepted when every scenario below produces the expected result in a 
 | **S24** | Org total envelope set lower than the sum of team envelopes; team `payments` still has balance; org total reached | `BUDGET_EXHAUSTED` with scope `org` for every team; dual-approved org adjustment re-opens |
 | **S25** | From inside the gateway container, attempt an HTTPS call to a non-EU model host (e.g. a `*.openai.com` or `us-east-1` endpoint) | Connection refused by egress allowlist; `egress_blocked` event |
 | **S26** | Policy replay: feed 1,000 synthetic decisions; count any route to a non-EU region | Zero |
+| **S30** | Prompt containing the caller's own registered address | 200; event shows `dlp.exempt.own_identity = 1` |
+| **S31** | Prompt containing addresses on reserved test domains (example.com, *.test) | 200; event shows `dlp.exempt.test_data = 2` |
+| **S32** | Security asks to read S1's stored content; approves it alone; reads before approval; the DPO approves; security reads; asks for S2's; a developer asks; the DPO erases | `open`; `APPROVER_MUST_DIFFER`; `ACCESS_NOT_APPROVED`; `approved`; prompt and answer returned and a `content_access` event naming both people; S2 `NOT_STORED`; developer `FORBIDDEN`; after erasure the body is null and the row stays |
+| **S33** | Client (demo persona; no real client in the PoC) asks a product question (`agl product-ask`) | 200 from `code-local`, answered from the feature catalog |
+| **S34** | Client sends a free prompt to the model | 4xx `CLIENT_SCOPE` |
+| **S35** | Client lists the feature catalog (`agl features`) | Catalog returned by the gateway, no model call |
 
 ## 6. Non-functional requirements for the PoC
 
@@ -179,6 +187,8 @@ The PoC is accepted when every scenario below produces the expected result in a 
 ## 9.1 Status (2026-10-19, updated 2026-10-20)
 
 Tier 1 is implemented in `stack/` and verified on a laptop with the mock model: `demo/run-scenarios.sh` passes 28 checks covering S1–S14, S19–S23, S25 and S26; the sandbox shell denies, allows, requires a human and blocks egress with each attempt in the audit chain; the Anthropic streaming surface redacts and restores PII. The real local tier is verified too: with the `model` profile, a CONFIDENTIAL request to `code-default` is rerouted to a Qwen coder model in Ollama and answered (CPU, ~5 s for a short prompt), cost 0, reroute recorded. Model weights are side-loaded into the Ollama volume by `deploy/server/pull-model.sh` because the in-stack Ollama has no route to any registry (PD-29). **SERVER deployment (2026-10-20):** the stack runs on SERVER (Windows 10, Docker Desktop/WSL 2) with the real Anthropic tier through the egress proxy, Qwen 7B on the GTX 1070 as `code-local`, Caddy TLS on `gateway.shortandsweet.home.ro:8443` over the tailnet, CoreDNS via Tailscale split DNS. The suite run from the Mac against SERVER passes 27 checks (S2b skipped by design). Claude Code itself works through the gateway: `ANTHROPIC_BASE_URL=https://gateway.shortandsweet.home.ro:8443` with the gateway JWT as `ANTHROPIC_AUTH_TOKEN` and `NODE_EXTRA_CA_CERTS` for the internal CA; its first call was logged as `redact` because Claude Code's system prompt contains the user's email address, which the gateway replaced before forwarding. Not yet exercised: Tier 2 (GitHub runner, Supabase stacks, parcel app). Deployment kit and the exact commands: `deploy/server/`. **2026-10-21 (PD-43):** the Anthropic tier is withdrawn; all work runs on `code-local`, the egress allowlist is empty, and the suite adds S4b, S25b, S27, S28 and S29.
+
+2026-10-21 (owner decisions, D-11 to D-14): personal data now blocks instead of being redacted (PD-49), the content store is built and mandatory, with two-person reads (PD-50); client accounts (a demo persona: there is no client yet) ask product questions from the feature catalog (PD-51). Scenarios S2 changed and S30–S35 were added; they are checked by unit tests, an embedded-Postgres run of the migrations and an integration run of the gateway against that database; not yet on SERVER.
 
 ## 10. PoC infrastructure
 
@@ -228,7 +238,7 @@ flowchart TB
 |---------|------------------------|-------------------------|
 | `gateway` | small Python service (FastAPI) or LiteLLM proxy with callbacks; decided in the Phase 1 spike | Entry point. Verifies JWT, resolves team, looks up registry, calls DLP and OPA, reserves/settles budget, writes audit, forwards |
 | `opa` | `openpolicyagent/opa` with `policy/` mounted; `opa test` in CI | PR-1 quarantine decision, PR-3 region rule, budget and classification rules |
-| `dlp` | in-process module or sidecar; regex rule sets from gitleaks + PII patterns | Blocks secrets, redacts PII before anything leaves `agl-net` |
+| `dlp` | in-process module or sidecar; regex rule sets from gitleaks + PII patterns | Blocks secrets and personal data before anything leaves `agl-net`; counts the caller's own address and test data as exempt |
 | `postgres` | `postgres:16`, migrations from document 05 | PR-1 gate tables and trigger; PR-2 ledger; PR-4 append-only hot copy |
 | `minio` | `minio/minio` with Object Lock enabled at bucket creation, compliance mode, retention 1 day for the demo | PR-4 WORM segments |
 | `minio-anchor` | second MinIO instance with different credentials and volume | PR-4 independent anchor store |
@@ -277,7 +287,7 @@ agl-poc/
 
 ### 10.4 What is deliberately not in the PoC
 
-Corporate IdP, Presidio, RFC 3161 timestamping, SIEM, HA, EU cloud regions, the content store, privileged access management for humans, and the sandbox orchestrator as a service (the PoC starts sandboxes with a script). Each has its production replacement listed in §7.
+Corporate IdP, Presidio, RFC 3161 timestamping, SIEM, HA, EU cloud regions, privileged access management for humans, and the sandbox orchestrator as a service (the PoC starts sandboxes with a script). Each has its production replacement listed in §7.
 
 ## 10.5 Two-machine deployment: SERVER + Mac over Tailscale
 

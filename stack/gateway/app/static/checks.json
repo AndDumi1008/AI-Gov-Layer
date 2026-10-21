@@ -6,13 +6,33 @@
  },
  "S2a": {
   "proof": "PR-3 EU only / privacy",
-  "title": "Personal data redacted before the prompt leaves; model sees placeholders",
+  "title": "Someone else's personal data blocks the request; nothing is sent (PD-49)",
   "annex": "A.5.34, A.8.12"
  },
  "S2b": {
   "proof": "PR-3",
-  "title": "Model-side view shows placeholders (mock tier only)",
+  "title": "The model never received the blocked prompt (mock tier only)",
   "annex": "A.8.12"
+ },
+ "S30a": {
+  "proof": "Privacy",
+  "title": "The caller's own registered address is allowed",
+  "annex": "A.5.34"
+ },
+ "S30b": {
+  "proof": "Privacy",
+  "title": "The exemption is recorded as a count (own_identity), never as a value",
+  "annex": "A.5.34, A.8.15"
+ },
+ "S31a": {
+  "proof": "Privacy",
+  "title": "Addresses on reserved test domains are allowed",
+  "annex": "A.5.34"
+ },
+ "S31b": {
+  "proof": "Privacy",
+  "title": "The exemption is recorded as a count (test_data)",
+  "annex": "A.5.34, A.8.15"
  },
  "S3": {
   "proof": "Data leakage",
@@ -168,6 +188,66 @@
   "proof": "G6 Traceability",
   "title": "Chain reconciled against GitHub's merge records: parcel-app",
   "annex": "A.5.33, A.8.15, A.8.32"
+ },
+ "S32a": {
+  "proof": "Content store",
+  "title": "Security asks to read S1's stored prompt, with a reason",
+  "annex": "A.8.15, A.5.28"
+ },
+ "S32b": {
+  "proof": "Content store",
+  "title": "Approving your own read request is refused",
+  "annex": "A.5.3, A.8.2"
+ },
+ "S32c": {
+  "proof": "Content store",
+  "title": "Nothing is readable before a second person approves",
+  "annex": "A.5.15, A.8.3"
+ },
+ "S32d": {
+  "proof": "Content store",
+  "title": "The DPO approves as the second person",
+  "annex": "A.5.3"
+ },
+ "S32e": {
+  "proof": "Content store",
+  "title": "The approved requester reads the stored prompt and answer",
+  "annex": "A.8.15"
+ },
+ "S32f": {
+  "proof": "Content store",
+  "title": "The read is itself an audit event, naming both people and the reason",
+  "annex": "A.8.15, A.5.33"
+ },
+ "S32g": {
+  "proof": "Content store",
+  "title": "A blocked request is never stored",
+  "annex": "A.5.34, A.8.12"
+ },
+ "S32h": {
+  "proof": "Content store",
+  "title": "Developers cannot ask to read stored prompts",
+  "annex": "A.8.3, A.5.15"
+ },
+ "S32i": {
+  "proof": "Content store",
+  "title": "The DPO erases stored content; the audit chain is untouched",
+  "annex": "A.5.34, A.8.10"
+ },
+ "S33": {
+  "proof": "Client questions",
+  "title": "A client's product question is answered from the feature catalog by the self-hosted model",
+  "annex": "A.5.10, A.8.3"
+ },
+ "S34": {
+  "proof": "Client questions",
+  "title": "A client cannot send free prompts to a model",
+  "annex": "A.5.15, A.8.3"
+ },
+ "S35": {
+  "proof": "Client questions",
+  "title": "The feature catalog is listed by the gateway without a model",
+  "annex": "A.5.10"
  },
  "C-SECRET": {
   "proof": "G3",

@@ -57,6 +57,7 @@ Today there is no single enforcement point. Developers can install any assistant
 | **Platform / SRE (Sven)** | Guarantee prod isolation; operate the gateway with low toil | Fear that an agent will run `kubectl` against prod |
 | **Internal auditor (Ola)** | Sample evidence quickly; verify immutability | Nothing to sample |
 | **Procurement / Legal (Lena)** | Standard vendor assessment; DPA, SCCs, exit terms | Ad-hoc vendor onboarding |
+| **Client product owner (Carla; demo persona, no client yet)** | Quick, reliable answers to "is this feature active?", "can we already do this?" | Has to ask the delivery team for every status question |
 
 ## 6. Scope of "AI" covered
 
@@ -88,7 +89,8 @@ Today there is no single enforcement point. Developers can install any assistant
 
 - **US-20** As CISO I can produce, for any date range, an immutable list of every AI request: identity, team, model, provider, region, token counts, classification outcome, policy decisions.
 - **US-21** As CISO I can prove that no AI identity holds production credentials and that no network route exists from AI tooling to production.
-- **US-22** As DPO I can query whether personal data was detected in prompts and what was done (redacted/blocked), and fulfil a DSAR or erasure request against the *content* store while the *audit* store stays immutable.
+- **US-22** As DPO I can query whether personal data was detected in prompts and what was done (blocked, or exempt as the caller's own address or test data), and fulfil a DSAR or erasure request against the *content* store while the *audit* store stays immutable.
+- **US-23** As a client product owner I can ask what the platform does today and get an answer from the reviewed feature catalog and the latest verification run, without access to code or production (D-13).
 - **US-23** As an auditor I can verify the hash chain of the audit log for a sample period and confirm WORM retention settings.
 - **US-24** As CISO I can onboard or decommission a model/provider through a defined workflow with a vendor assessment, DPA, region check and risk acceptance.
 
@@ -106,10 +108,10 @@ Today there is no single enforcement point. Developers can install any assistant
 | FR-02 | Gateway authenticates callers via corporate IdP (OIDC) for humans and workload identity for services; no shared static keys | Must |
 | FR-03 | Model registry: allowlist of (provider, model, region, data-classification ceiling, cost tier, status) | Must |
 | FR-04 | Policy engine evaluates every request: identity → team → allowed models → classification → DLP → budget → route | Must |
-| FR-05 | DLP: detect secrets, credentials, personal data, customer identifiers, and configured keywords in prompts; actions: allow / redact / block, per classification | Must |
+| FR-05 | DLP: detect secrets, credentials, personal data, customer identifiers, and configured keywords in prompts; action: block (owner, 2026-10-21; D-11). The caller's own registered address and reserved test domains are exempt and counted | Must |
 | FR-06 | Budget ledger: per org / team / project / identity envelopes, hard and soft limits, real-time decrement, alerts, exception workflow | Must |
 | FR-07 | Immutable audit log: one record per request and per policy decision, written to append-only storage with hash chain and WORM retention | Must |
-| FR-08 | Content store (prompt/response bodies) separate from audit store; encrypted; configurable retention; erasable for GDPR; disabled by default for high classifications | Must |
+| FR-08 | Content store (prompt/response bodies and agent commands with output) separate from audit store; encrypted per team; 30-day retention (configurable); erasable for GDPR; mandatory for every request that reaches a model, all classifications (owner, 2026-10-21; D-12) | Must |
 | FR-09 | SDLC controls: PR labelling of AI-assisted changes, mandatory independent human review, signed commits, CI gates (SAST, secrets, dependencies, licenses, tests), policy-as-code | Must |
 | FR-10 | Deploy controls: production deploys only from signed, provenance-attested artifacts, via GitOps, with human approval in a protected environment; no AI identity may trigger or approve | Must |
 | FR-11 | Production isolation: AI identities denied all production IAM; AI tooling networks have no route to production; prod data never copied to AI-reachable environments without masking | Must |
@@ -197,12 +199,17 @@ Legal review required: confirm which of NIS2/DORA apply; confirm retention perio
 
 ## 14. Open questions
 
-| # | Question | Owner | Needed by |
-|---|----------|-------|-----------|
-| Q1 | Which sector regulations apply (NIS2, DORA, sector-specific)? | Legal | Phase 0 |
-| Q2 | Required retention for audit records (24 vs 60+ months)? | Legal/DPO | Phase 0 |
-| Q3 | Is a self-hosted model tier required in v1 for high-classification data, or is it enough to block such data from AI entirely? | CISO | Phase 1 |
-| Q4 | Budget granularity: per team only, or per person as well? | Finance/Eng | Phase 1 |
-| Q5 | GitHub or GitLab (affects CI gate implementation)? | Eng | Phase 0 |
-| Q6 | Do we allow any agentic tool with write access to dev clusters, or read-only + PR-only? | Platform/CISO | Phase 2 |
-| Q7 | Do we need DSAR capability over prompt *content*, or do we avoid storing content for most classes? | DPO | Phase 1 |
+Owner answers of 2026-10-21 are recorded in the Decision Log (D-05, D-11 to D-14) and, for Q5 and Q7, in the last column.
+
+| # | Question | Owner | Needed by | Answer |
+|---|----------|-------|-----------|--------|
+| Q1 | Which sector regulations apply (NIS2, DORA, sector-specific)? | Legal | Phase 0 | open |
+| Q2 | Required retention for audit records (24 vs 60+ months)? | Legal/DPO | Phase 0 | open |
+| Q3 | Is a self-hosted model tier required in v1 for high-classification data, or is it enough to block such data from AI entirely? | CISO | Phase 1 | open |
+| Q4 | Budget granularity: per team only, or per person as well? | Finance/Eng | Phase 1 | open |
+| Q5 | GitHub or GitLab (affects CI gate implementation)? | Eng | Phase 0 | GitHub for now (owner, 2026-10-21); EU-resident once real code is involved (D-14, PD-16) |
+| Q6 | Do we allow any agentic tool with write access to dev clusters, or read-only + PR-only? | Platform/CISO | Phase 2 | open |
+| Q7 | Do we need DSAR capability over prompt *content*, or do we avoid storing content for most classes? | DPO | Phase 1 | Yes: prompts and agent actions are stored for every class, 30 days, erasable (D-12) |
+| Q8 | Retention of stored prompts: are 30 days right, given employee-monitoring rules (RO Law 190/2018 art. 5)? | DPO/Legal | Before go-live | 30 days, accepted by the owner (2026-10-21; D-12) |
+| Q9 | "The client" who asks product questions: people on the client side asking about the delivered platform, or about their own product? | Owner | Next demo | No client at the moment: this is a PoC; `carla` is a demo persona (owner, 2026-10-21; PD-51) |
+| Q10 | May this repository (synthetic code only) stay on GitHub.com with GitHub-hosted runners until the EU host exists? | Owner | Phase 0 | Yes, for now GitHub (owner, 2026-10-21; D-14) |

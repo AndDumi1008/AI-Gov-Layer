@@ -37,14 +37,14 @@ IDs are `PD-xx`, chronological.
 | PD-06 | Auditing AI decisions: what to record and how to link it | decided | 2026-10-19 |
 | PD-07 | Agents on laptops inherit the operator's privileges | decided | 2026-10-19 |
 | PD-08 | Model weights are a supply chain | decided | 2026-10-19 |
-| PD-09 | The agent's output is also a data exit | open | 2026-10-19 |
+| PD-09 | The agent's output is also a data exit | decided (owner, 2026-10-21: code is data); push-path DLP proposed; not applied | 2026-10-19 |
 | PD-10 | Images signed before review; release accepts any signed digest | verified | 2026-10-19 |
 | PD-11 | CI executes untrusted PR code with privileges | applied | 2026-10-19 |
 | PD-12 | Long-lived GitOps tokens as repository secrets | applied | 2026-10-19 |
 | PD-13 | Audit evidence endpoint has no authentication in the example | applied | 2026-10-19 |
 | PD-14 | Squash merge drops the AI-Assisted trailer | open | 2026-10-19 |
 | PD-15 | `ai-label` check trusts the author | decided | 2026-10-19 |
-| PD-16 | CI runner location versus EU residency | open | 2026-10-19 |
+| PD-16 | CI runner location versus EU residency | decided (owner, 2026-10-21: EU-resident Git host and runners); host choice open; not applied | 2026-10-19 |
 | PD-17 | Actions pinned to tags rather than commit SHAs | verified | 2026-10-19 |
 | PD-18 | Git hosting for the PoC: GitHub.com with a self-hosted runner on SERVER | applied | 2026-10-19 |
 | PD-19 | Demo application on self-hosted Supabase (SERVER) with Vercel frontend; release path without GitOps/kind | applied | 2026-10-19 |
@@ -74,9 +74,12 @@ IDs are `PD-xx`, chronological.
 | PD-43 | EU only, no exception: the US endpoint is revoked, all model work runs on the self-hosted tier (issue #19) | decided; applied in repo, not on SERVER | 2026-10-21 |
 | PD-44 | Vercel removed: the parcel frontend runs only on SERVER, a static export in one web container per environment (issue #22) | applied | 2026-10-21 |
 | PD-45 | Parcel frontend hosting: read-only web container plus an SSH forced-command deploy account per environment; Caddy routes (issue #25) | applied | 2026-10-21 |
-| PD-48 | Evidence reconciled against GitHub's own records: collector + gateway judge; never-reported historical gates listed, not failed; every merge so far is a self-merge | verified | 2026-10-21 |
-| PD-47 | Gateway restarts lost unflushed audit events from WORM (hot copy kept them); flush on shutdown and recovery at startup | verified | 2026-10-21 |
 | PD-46 | Sandboxes shared the governance network: could reach Postgres, MinIO, OPA and the egress proxy; now on a dedicated internal network with the gateway only (issue #26) | verified | 2026-10-21 |
+| PD-47 | Gateway restarts lost unflushed audit events from WORM (hot copy kept them); flush on shutdown and recovery at startup | verified | 2026-10-21 |
+| PD-48 | Evidence reconciled against GitHub's own records: collector + gateway judge; never-reported historical gates listed, not failed; every merge so far is a self-merge | verified | 2026-10-21 |
+| PD-49 | Personal data in prompts is blocked, not redacted; own address and reserved test domains exempt and counted | applied in repo, not on SERVER | 2026-10-21 |
+| PD-50 | Prompts, answers and agent commands stored: encrypted per team, 30 days, reads and erasures audited; no store, no request | applied in repo, not on SERVER | 2026-10-21 |
+| PD-51 | Client accounts ask product questions only, answered from a reviewed feature catalog, never from code or production | applied in repo, not on SERVER | 2026-10-21 |
 
 ---
 
@@ -173,8 +176,9 @@ IDs are `PD-xx`, chronological.
 **Why it matters.** A fixture with real customer data or a pasted log in a PR comment leaves the region silently.
 **Fixes considered.** DLP on the push path (pre-receive hook or CI check on the diff and PR body); DLP on CI log output; residency assessment of the Git host and runners like any model vendor; EU self-hosted runners.
 **Thought process.** The pipeline already has a secrets scan; extending it to personal-data patterns on diffs and PR bodies is small. The runner and host location is a business decision (see PD-16).
-**Decision.** Open. Owner: security + platform. Needed before Phase 2 exit.
-**Status.** open.
+**Decision (owner, 2026-10-21).** "Both the code and the data" stay in the EU: what an agent writes (commits, PR text, fixtures, CI logs) is data under the EU-only rule, so the Git host and runners are assessed like a model vendor and must be EU-resident (PD-16, D-14). Proposed with it, to be confirmed by security + platform: the push-path check adopts the gateway's rule for prompts (PD-49), so secrets and personal data on the diff and the PR body block the PR, with the same own-address and test-domain exemptions; CI log scanning follows.
+**Applied in.** Not yet. The gateway side (prompts and agent commands) is covered by PD-49 and PD-50; the push-path check is catalog item `push-path-dlp` (planned).
+**Status.** decided.
 
 ## PD-10 — Images signed before review; release accepts any signed digest
 
@@ -240,8 +244,11 @@ IDs are `PD-xx`, chronological.
 **Problem.** GitHub-hosted runners run outside the EU; Gate 2 builds and the preview deploy run there with source code and masked data.
 **Why it matters.** Whether source code leaving the region violates the residency rule is a business decision not yet taken.
 **Fixes considered.** Accept for code and masked data, forbid for anything higher; or EU self-hosted ephemeral runners for all workflows.
-**Decision.** Open. Owner: CISO with legal. Needed in Phase 0.
-**Status.** open.
+**Decision (owner, 2026-10-21).** Asked "must the code itself stay in the EU, or only production data?", the owner answered "both the code and the data". So: EU self-hosted ephemeral runners for all workflows, and an EU-resident Git host (GitHub Enterprise Cloud with EU data residency, or GitLab/Gitea self-hosted in the EU). D-14.
+**Pros.** One rule for code and data; no residency argument per workflow. **Cons.** Runner fleet to operate; the host migration has a cost the owner still has to choose between.
+**Owner, 2026-10-21.** "For now GitHub": this repository (synthetic code only) stays on GitHub.com with GitHub-hosted runners during the PoC; the EU-resident host and runners apply once real code is involved.
+**Applied in.** Not yet (catalog item `eu-git-hosting`, planned).
+**Status.** decided.
 
 ## PD-17 — Actions pinned to tags rather than commit SHAs
 
@@ -544,6 +551,40 @@ gateway:8000 REACHABLE · everything else blocked (name resolution fails: the se
 **Pros.** Completeness is now asserted against an external system's records, in both directions, and the result is itself in the chain. **Cons.** The collector runs under a human identity on a schedule we choose, not as part of CI; a merge made and deleted between two runs would be missed by GitHub's API as well (the repository audit log is organisation-only on GitHub, PD-20).
 **Applied in.** `stack/gateway/app/scm.py`, endpoints, `stack/cli/agl reconcile`, suite S27, report. Verified on SERVER: 18 records imported, steady-state run matches all, exit 0.
 **Status.** verified.
+
+## PD-49 — Personal data in prompts is blocked, not redacted
+
+**Problem.** The owner was asked: when someone sends personal data or a secret, block, mask or only warn? Answer (2026-10-21): block. The PoC redacted personal data into placeholders and restored it in the answer (S2 asserted `PII_REDACTED`).
+**Why it matters.** Redaction sends the rest of the prompt and relies on the detector having found everything; blocking makes the person remove the data first. It also changes what the model sees: nothing is rewritten any more, so the stored prompt (PD-50) is exactly what the model received.
+**Fixes considered.** (a) Block every match. (b) Block, with exemptions for values that are not someone else's personal data, counted in the event. (c) Block above a count threshold.
+**Thought process.** (a) breaks Claude Code: its system prompt carries the user's own address (PD-35), so every call would be blocked; it also blocks fixtures written on reserved test domains. (c) has no principled threshold. (b) keeps the rule strict for real third-party data and makes every exemption visible.
+**Decision.** (b). `PII_DETECTED` is a hard block in policy, like `SECRET_DETECTED`; there is no redact outcome. The gateway exempts the caller's own registered address (`own_identity`) and addresses on reserved domains (`test_data`: example.com/.net/.org and subdomains, *.test, *.example, *.invalid, *.localhost; RFC 2606/6761). Phone numbers and IBANs have no reserved range and are never exempt. Exemptions are counted in the request event (`dlp.exempt`); block responses list finding types and counts, never values. Look-alike domains (example.ro, example.de) are ordinary domains and block.
+**Pros.** Owner's rule, enforced in one place; the model never receives third-party personal data; the exemptions are auditable. **Cons.** More false positives stop work; the false-positive path (F-05) becomes important. If a tool's system prompt carries an address other than the identity's registered one, every call from that tool is blocked until they match. Claude Code on the Mac is such a case, very likely: PD-35 saw it put the user's email into its system prompt, and the only address it holds is the logged-in account's, on an ordinary domain, not the seeded identity's `@example.test`. A local probe (2026-10-21) could not confirm it: the installed managed settings send to SERVER with an expired token (401), and intercepting the request locally was not permitted. Check on SERVER after deploy (owner agreed): a plain-terminal Claude Code call with a fresh token. If it returns `PII_DETECTED`, set the identity's registered address on SERVER to the account address (`update identity set email=… where subject=…`), which is what "own address" means; no code change.
+**Applied in.** `stack/gateway/app/dlp.py`, `main.py` (own address from the identity record, findings in the block body), `stack/policy/agl.rego` (+ tests), scenarios S2a/S2b (block, the model never saw it), S30a/b (own address), S31a/b (test domains); unit tests in `test_dlp_and_chain.py`; AUP §4; D-11.
+**Status.** applied in repo, not on SERVER (needs the rebuild in PD-50).
+
+## PD-50 — Prompts, answers and agent commands are stored
+
+**Problem.** The owner was asked whether logging keeps the prompts or only who prompted and what the AI did. Answer (2026-10-21): the prompts and the resulting actions. D-09 had made the content store optional and off for CONFIDENTIAL; the PoC had the table but never wrote to it, and agent commands were kept only as a hash and a 120-character preview inside the audit event.
+**Why it matters.** Investigations and access requests need content. But personal data in an immutable store would make GDPR erasure impossible, and storing every engineer's prompts is processing of employee data.
+**Fixes considered.** (a) Put prompts into the audit events. (b) Keep D-09's separation and make the content store mandatory: encrypted, short retention, erasable, reads audited. (c) Store only for some classifications.
+**Thought process.** (a) breaks erasure and the "no personal data in WORM" property. (c) contradicts the answer. (b) satisfies the owner and keeps the immutable chain clean: the chain holds fingerprints, the content store holds bodies that can be removed, and every removal is itself in the chain.
+**Decision.** (b). Policy obligation `log_content` is true for every request that reaches a model, whatever its classification; blocked requests are never stored (they hold the data that blocked them). Bodies are AES-256-GCM encrypted with a per-team key derived from `AGL_CONTENT_KEY` (HKDF-SHA256) and bound to their audit event id. Retention `AGL_CONTENT_RETENTION_DAYS` (30): expired bodies are removed every five minutes and the count is a `content_expired` event. Reading takes two people (owner, 2026-10-21, T-CNT-04): `security_admin` or `dpo` asks with a reason of at least ten characters (`agl content request`, event `content_access_requested`); a different person with `security_admin`, `dpo` or `team_lead` approves (`agl content approve`, `content_access_approved`; self-approval refused); only the asker may then read, for 24 hours (`agl content show --access`, `content_access` naming both people). Erasure: `dpo`, per request or per person, written as `content_erased` (`agl content erase`). Agent commands: the full command is stored with the `agent_action_*` event (the 120-character preview left the audit event), and `agl-shell` sends the last 16 KiB of output, stored on the same record. A database trigger lets bodies be removed but never rewritten, and an erased record stays erased; the gateway role cannot delete rows. No key, or a failed write: the request fails closed (`GOVERNANCE_UNAVAILABLE`) before any spend, or the answer is withheld (D-05). Responses carry `X-AGL-Content: stored 30d`.
+**Pros.** Owner's rule; the audit chain stays free of content; erasure and expiry are provable. **Cons.** Losing the key loses the bodies (back it up like the issuer keys). Agent output is not DLP-scanned before storage. Employee monitoring: the AUP is the prior notice; the owner accepted 30 days (2026-10-21), which matches the 30-day cap of Romanian Law 190/2018 art. 5; the DPO documents the legal basis.
+**Applied in.** `stack/gateway/app/content.py` (new), `main.py` (request path, `/agl/content/*`, sandbox actions), `config.py`, `stack/sandbox/agl-shell`, `stack/schema/030_content_store.sql` (new; table `content_access_request`), `stack/policy/agl.rego`, `stack/cli/agl`, `stack/.env.example`, `stack/bootstrap.sh` (generates the key), CI schema checks, scenarios S32a–i, `test_content.py`; AUP §2, §5, §7; D-12.
+**SERVER (owner).** (1) Add `AGL_CONTENT_KEY` to `stack/.env` (`openssl rand -base64 32`) and keep a copy offline; until it is set every model request is refused. (2) Run `030_content_store.sql` and `040_client.sql` on the live database (both idempotent, like 020). (3) Rebuild `gateway` and `sandbox`, then `make demo-server`. (4) Run Claude Code from a plain terminal with a fresh token (PD-49) and check the decision.
+**Status.** applied in repo, not on SERVER.
+
+## PD-51 — Client accounts ask product questions from a feature catalog
+
+**Problem.** The owner was asked whether the tool is for engineers only or also for other people. Answer (2026-10-21): engineers for coding, and the client should be able to ask specific questions about what already exists ("do we have this feature active?", "can we already do this?").
+**Why it matters.** "Is it active?" is literally a question about production state, and the client should not see code. Answered naively (a model with repository or production access) it breaks D-08 and exposes code.
+**Fixes considered.** (a) Let clients use the normal chat with a system prompt. (b) A dedicated endpoint where the gateway builds the prompt from a reviewed catalog and the latest verification run; clients can use nothing else. (c) Answer from live production state.
+**Thought process.** (a) leaves free prompts open; a client could paste anything and ask anything. (c) gives an AI read access to production. (b) answers the question the owner described with evidence that already exists: the scenario suite proves what is active, and the run records (#8) say when it last passed.
+**Decision.** (b). Role `client` (migration `040_client.sql`, seeded user `carla` in team `client-product` with a 0.50 EUR envelope). `POST /agl/ask` (`agl product-ask`, and the chat in client mode) sends the catalog `stack/catalog/features.json` plus the latest `run_finished` result as the system prompt to the self-hosted model, classification INTERNAL, no repository. Policy blocks any other request from a client, and a client request with repository context (`CLIENT_SCOPE`); a client who also holds `developer` is a developer. `GET /agl/features` (`agl features`, chat `/features`) returns the catalog without a model. The catalog is mounted read-only and hashed into every run's `config_snapshot`; a unit test fails if an active feature cites no proof, cites a check the suite does not run, or if the prompt built from it would trip the gateway's own DLP.
+**Pros.** Answers with evidence, no code or production access, same governance as everyone (DLP, budget, storage, audit). **Cons.** The catalog is maintained by hand; it is as honest as its reviews. The 7B self-hosted model answers less well than a frontier model would. Owner, 2026-10-21: there is no client at the moment, this is a PoC; `carla` is a demo persona and the catalog describes the PoC.
+**Applied in.** `stack/gateway/app/catalog.py` (new), `main.py` (`/agl/ask`, `/agl/features`), `stack/catalog/features.json` (new), `stack/policy/agl.rego` (+ tests), `stack/schema/040_client.sql` (new), `runs.py` and compose (catalog mount and digest), CLI, chat (client mode, `/features`), scenarios S33–S35, `test_catalog.py`; AUP §1, §3, §5; D-13.
+**Status.** applied in repo, not on SERVER (see PD-50 for the SERVER steps).
 
 ## Template for new entries
 

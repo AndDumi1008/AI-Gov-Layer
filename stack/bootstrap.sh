@@ -2,7 +2,13 @@
 # First-time setup: .env, DNS zone, then bring the stack up with the chosen profiles.
 set -euo pipefail
 cd "$(dirname "$0")"
-[ -f .env ] || { cp .env.example .env; echo "created .env from .env.example — edit passwords (and ANTHROPIC_API_KEY) before using on SERVER"; }
+[ -f .env ] || { cp .env.example .env; echo "created .env from .env.example — edit passwords before using on SERVER"; }
+# content store key (PD-50): generated once, never committed; a missing key stops every model request (fail closed)
+if ! grep -qE '^AGL_CONTENT_KEY=.+' .env; then
+  key=$(openssl rand -base64 32)
+  if grep -qE '^AGL_CONTENT_KEY=' .env; then sed -i.bak "s|^AGL_CONTENT_KEY=.*|AGL_CONTENT_KEY=${key}|" .env && rm -f .env.bak; else echo "AGL_CONTENT_KEY=${key}" >> .env; fi
+  echo "generated AGL_CONTENT_KEY in .env (back it up: without it stored prompts cannot be read)"
+fi
 set -a; . ./.env; set +a
 case "${POSTGRES_PASSWORD}${AGL_GATEWAY_DB_PASSWORD}${MINIO_ROOT_PASSWORD}${ANCHOR_ROOT_PASSWORD}" in *changeme*)
   if [ "${AGL_ALLOW_PLACEHOLDERS:-}" != "1" ]; then echo "stack/.env still has placeholder passwords. Edit it, or for a throw-away laptop run: AGL_ALLOW_PLACEHOLDERS=1 ./bootstrap.sh"; exit 1; fi;;

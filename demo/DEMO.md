@@ -41,20 +41,34 @@ agl models                       # code-local (self-hosted, EU) approved; code-d
 agl ask "Write a function that parses an ISO date." -c INTERNAL -r shortandsweet/booking-svc
 ```
 
-Point at the headers: `X-AGL-Decision: allow`, `X-AGL-Model: code-local`, `X-AGL-Cost-EUR`, `X-AGL-Event`. Then:
+Point at the headers: `X-AGL-Decision: allow`, `X-AGL-Model: code-local`, `X-AGL-Cost-EUR`, `X-AGL-Event`, `X-AGL-Content: stored 30d`. Then:
 
 ```bash
 agl why <event id>               # the full event: who, which model, region, residency class, decision, policy reasons, prompt hash only
 ```
 
-Say: the prompt text is not in the record. That is deliberate (D-09): the immutable store holds no personal data, so GDPR erasure never conflicts with immutability.
+Say: the prompt text is not in the record. That is deliberate (D-09): the immutable store holds no personal data, so GDPR erasure never conflicts with immutability. The prompt *is* kept, as the owner asked (D-12): encrypted in a separate store for 30 days, and reading it takes two people:
+
+```bash
+agl login --as ines
+agl content request <event id> --reason "demo: show what is stored"   # prints a request id
+agl content approve <request id>                                      # refused: you cannot approve your own request
+agl login --as pawel && agl content approve <request id>              # the DPO approves as the second person
+agl login --as ines && agl content show <event id> --access <request id>
+agl events --limit 1 --type content_access                            # the read names both people and the reason
+```
 
 ## Act 2 — privacy and leakage (5 min)
 
 ```bash
 agl ask "Email ana.popescu@example.ro and jonas.weber@example.de about the parcel." -c INTERNAL
 ```
-`X-AGL-Decision: redact`, `PII_REDACTED`. The model received `[EMAIL_1]`, `[EMAIL_2]`; the answer came back with the real addresses restored inside the gateway.
+Blocked, `PII_DETECTED`, "2 × EMAIL" and no values. Nothing was sent and nothing was stored (owner decision: block, not mask; D-11). Then show what is allowed:
+
+```bash
+agl ask "Send the summary to me at dana@example.test." -c INTERNAL     # your own address: allowed, counted as own_identity
+agl ask "Use qa.team@example.com in the fixture." -c INTERNAL           # reserved test domain: allowed, counted as test_data
+```
 
 ```bash
 agl ask "Why does AKIAABCDEFGHIJKLMNOP fail with 403?" -c INTERNAL
@@ -141,7 +155,9 @@ Open the Code to Production Journey. Walk steps 5 to 11 and one detour (rollback
 | Who can turn these controls off? | Policy and registry changes need two approvers and are themselves audit events. Nobody can edit or delete the audit record, including the people who run the system. |
 | What does it cost? | Metered to the cent per team and model; one Claude Code turn is about €0.03 at list price. The budget caps are real limits. |
 | What is not done? | Merge/deploy governance (Tier 2), IdP integration (tokens are hand-minted and expire in 8 h), high availability, Presidio-grade PII detection, and the 30-day retention on SERVER would be 24 months in production. |
-| What leaves the building? | No prompt goes to any model outside SERVER. The code goes to GitHub (see PD-43 for what that means for EU only). Logs never leave. |
+| What leaves the building? | No prompt goes to any model outside SERVER. The owner's rule is that code stays in the EU too (D-14): the move to an EU Git host and EU runners is decided but not done, and this repository (synthetic code) is still on GitHub.com. Logs and stored prompts never leave. |
+| Who reads our prompts? | Nobody by default. Prompts and answers are kept 30 days, encrypted; reading one takes two people (one asks with a reason, a different one approves), and the read is in the audit chain; the DPO can erase them per person. Blocked prompts are never stored. |
+| Can the client ask what is ready? | There is no client yet (this is a PoC); the capability is shown with the demo persona `carla`: `agl product-ask "Do we already block personal data?"` or the chat. Answers come from the feature catalog and the latest verification run; clients cannot send free prompts or see code (D-13). |
 
 ## After the room
 

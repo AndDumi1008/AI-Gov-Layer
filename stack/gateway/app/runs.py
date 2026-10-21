@@ -3,7 +3,7 @@ gate templates and image versions in force"). A run is a correlation id carried 
 (header `x-agl-run`); `config_snapshot` is its first event and `run_finished` its last.
 
 The gateway hashes files from read-only mounts under CONFIG_ROOT (policy bundle, egress allowlist, workflow
-templates, compose file). Image digests cannot be read from inside a container without a Docker socket, so the
+templates, compose file, feature catalog). Image digests cannot be read from inside a container without a Docker socket, so the
 CLI collects them from the engine and sends them with the start request; they are recorded as client-reported."""
 import os, hashlib, uuid, json
 from contextvars import ContextVar
@@ -16,6 +16,7 @@ CONFIG_PATHS = {
     "egress_allowlist": "proxy/squid.conf",
     "workflow_templates": "workflows",
     "compose": "docker-compose.yml",
+    "feature_catalog": "catalog",   # what client product questions are answered from (PD-51)
 }
 
 current_run: ContextVar[str | None] = ContextVar("agl_run", default=None)

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """agl — command-line client for the AI Governance Layer PoC.
 Config: AGL_URL (default http://127.0.0.1:4000), token in ~/.agl/token (agl login --as <user>)."""
-import os, sys, json, argparse, subprocess, pathlib, ssl, urllib.request, urllib.error
+import os, sys, json, argparse, subprocess, pathlib, ssl, urllib.request, urllib.error, urllib.parse
 
 URL = os.environ.get("AGL_URL", "http://127.0.0.1:4000").rstrip("/")
 # Python does not use the macOS/Windows system trust store. For a gateway behind Caddy's internal CA, point
@@ -103,6 +103,13 @@ def main():
     sub.add_parser("whoami"); sub.add_parser("models"); sub.add_parser("budget"); sub.add_parser("datasets")
     s = sub.add_parser("ask", help="send a prompt through the gateway"); s.add_argument("prompt"); s.add_argument("--model", default="code-local")
     s.add_argument("--classification", "-c"); s.add_argument("--repo", "-r"); s.add_argument("--surface", choices=["openai", "anthropic"], default="openai"); s.add_argument("--stream", action="store_true")
+    s = sub.add_parser("product-ask", help="client product question, answered from the feature catalog (PD-51)"); s.add_argument("question")
+    sub.add_parser("features", help="the feature catalog and the latest verification run (no model)")
+    s = sub.add_parser("content", help="content store (PD-50): reading takes two people (request, approve, show); erasure by the DPO; all audited"); cs = s.add_subparsers(dest="sub", required=True)
+    x = cs.add_parser("request", help="ask to read what was stored for a request event"); x.add_argument("event_id"); x.add_argument("--reason", required=True)
+    x = cs.add_parser("approve", help="approve someone else's request (a second person)"); x.add_argument("request_id")
+    x = cs.add_parser("show", help="read, with your approved request"); x.add_argument("event_id"); x.add_argument("--access", required=True, help="your approved request id")
+    x = cs.add_parser("erase"); g = x.add_mutually_exclusive_group(required=True); g.add_argument("--event"); g.add_argument("--subject"); x.add_argument("--reason", required=True)
     s = sub.add_parser("why", help="explain a decision"); s.add_argument("event_id")
     s = sub.add_parser("events"); s.add_argument("--limit", type=int, default=20); s.add_argument("--type")
     s = sub.add_parser("topup"); ts = s.add_subparsers(dest="sub", required=True)
@@ -150,6 +157,14 @@ def main():
         if args.stream and st < 400:
             print(b); print("—", json.dumps({k: v for k, v in h.items() if k.lower().startswith("x-agl")})); sys.exit(0)
         out(st, b, h)
+    if args.cmd == "product-ask":
+        st, h, b = call("POST", "/agl/ask", {"question": args.question}); out(st, b, h)
+    if args.cmd == "features": out(*call("GET", "/agl/features")[::2])
+    if args.cmd == "content":
+        if args.sub == "request": out(*call("POST", "/agl/content/access", {"event_id": args.event_id, "reason": args.reason})[::2])
+        if args.sub == "approve": out(*call("POST", f"/agl/content/access/{args.request_id}/approve", {})[::2])
+        if args.sub == "show": out(*call("GET", f"/agl/content/{args.event_id}?access={urllib.parse.quote(args.access)}")[::2])
+        if args.sub == "erase": out(*call("POST", "/agl/content/erase", {"event_id": args.event, "subject": args.subject, "reason": args.reason})[::2])
     if args.cmd == "why": out(*call("GET", f"/agl/events/{args.event_id}")[::2])
     if args.cmd == "events":
         q = f"?limit={args.limit}" + (f"&type={args.type}" if args.type else "")

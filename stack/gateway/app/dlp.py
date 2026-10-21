@@ -1,5 +1,9 @@
-"""DLP: secrets (block) and personal data (redact) with reversible placeholders.
-Only finding TYPES and COUNTS are ever logged; matched values stay inside the request."""
+"""DLP: secrets and personal data are detected; policy blocks both (owner decision 2026-10-21, PD-49).
+Only finding TYPES and COUNTS are ever logged; matched values stay inside the request.
+
+Two kinds of personal-data match are exempt and counted separately, never silently:
+  own_identity — the caller's own registered address (developer tools put it in their system prompt);
+  test_data    — addresses on domains reserved for examples and tests (RFC 2606, RFC 6761)."""
 import re
 from dataclasses import dataclass, field
 
@@ -19,6 +23,11 @@ PII_RULES = {
     "PHONE": re.compile(r"(?<![\w/])(?:\+|00)[1-9]\d{0,2}[ .-]?(?:\(?\d{1,4}\)?[ .-]?){2,4}\d{2,4}\b"),
 }
 
+# Reserved for documentation and testing: example.com/.net/.org and their subdomains (RFC 2606),
+# and the special-use TLDs .test, .example, .invalid, .localhost (RFC 2606 / RFC 6761). Nobody can own them.
+TEST_DOMAINS = ("example.com", "example.net", "example.org")
+TEST_TLDS = ("test", "example", "invalid", "localhost")
+
 @dataclass
 class Finding:
     type: str
@@ -29,9 +38,11 @@ class Finding:
 class ScanResult:
     secrets: list = field(default_factory=list)
     pii: list = field(default_factory=list)
+    exempt: dict = field(default_factory=lambda: {"own_identity": 0, "test_data": 0})
     def summary(self) -> dict:
         return {"secrets": sum(f.count for f in self.secrets), "pii": sum(f.count for f in self.pii),
-                "findings": [{"type": f.type, "rule": f.rule, "count": f.count} for f in self.secrets + self.pii]}
+                "findings": [{"type": f.type, "rule": f.rule, "count": f.count} for f in self.secrets + self.pii],
+                "exempt": dict(self.exempt)}
 
 def _iban_ok(s: str) -> bool:
     s = s.replace(" ", "")
@@ -41,8 +52,17 @@ def _iban_ok(s: str) -> bool:
     n = "".join(str(int(ch, 36)) for ch in r)
     return int(n) % 97 == 1
 
-def scan(text: str) -> ScanResult:
+def is_test_value(type_: str, value: str) -> bool:
+    """Only email addresses have a reserved namespace; phone numbers and IBANs never count as test data."""
+    if type_ != "EMAIL":
+        return False
+    domain = value.rsplit("@", 1)[-1].lower().rstrip(".")
+    return any(domain == d or domain.endswith("." + d) for d in TEST_DOMAINS) or domain.rsplit(".", 1)[-1] in TEST_TLDS
+
+def scan(text: str, own_values: tuple | list = ()) -> ScanResult:
+    """own_values: the caller's own registered identifiers (today: the identity's email address)."""
     res = ScanResult()
+    own = {v.strip().lower() for v in own_values if v}
     for name, rx in SECRET_RULES.items():
         c = len(rx.findall(text))
         if c:
@@ -51,32 +71,14 @@ def scan(text: str) -> ScanResult:
         matches = [m.group(0) for m in rx.finditer(text)]
         if name == "IBAN":
             matches = [m for m in matches if _iban_ok(m)]
-        if matches:
-            res.pii.append(Finding(name, f"pii.{name.lower()}.v1", len(matches)))
+        counted = 0
+        for m in matches:
+            if m.lower() in own:
+                res.exempt["own_identity"] += 1
+            elif is_test_value(name, m):
+                res.exempt["test_data"] += 1
+            else:
+                counted += 1
+        if counted:
+            res.pii.append(Finding(name, f"pii.{name.lower()}.v1", counted))
     return res
-
-def redact(text: str, mapping: dict | None = None) -> tuple[str, dict]:
-    """Replace PII with [TYPE_n] placeholders; returns new text and placeholder→original map (shared across messages)."""
-    mapping = mapping if mapping is not None else {}
-    reverse = {v: k for k, v in mapping.items()}
-    def repl_factory(t):
-        def repl(m):
-            val = m.group(0)
-            if t == "IBAN" and not _iban_ok(val):
-                return val
-            if val in reverse:
-                return reverse[val]
-            n = sum(1 for k in mapping if k.startswith(f"[{t}_")) + 1
-            ph = f"[{t}_{n}]"
-            mapping[ph] = val
-            reverse[val] = ph
-            return ph
-        return repl
-    for t, rx in PII_RULES.items():
-        text = rx.sub(repl_factory(t), text)
-    return text, mapping
-
-def restore(text: str, mapping: dict) -> str:
-    for ph, val in mapping.items():
-        text = text.replace(ph, val)
-    return text

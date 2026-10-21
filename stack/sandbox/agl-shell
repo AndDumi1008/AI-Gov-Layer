@@ -9,8 +9,12 @@ run_one() {
          --data "$(jq -cn --arg c "$cmd" '{command:$c}')" 2>/dev/null) || { echo "[agl] governance unavailable — command not executed (fail closed)"; return 97; }
   local outcome; outcome=$(echo "$resp" | jq -r .outcome)
   case "$outcome" in
-    allow) bash -c "$cmd"; local rc=$?; curl -fsS -X POST "$AGL_GATEWAY/agl/sandbox/action/result" -H "Authorization: Bearer $AGL_TOKEN" -H 'content-type: application/json' \
-             --data "$(jq -cn --arg id "$(echo "$resp" | jq -r .event_id)" --argjson rc $rc '{event_id:$id, exit_code:$rc}')" >/dev/null 2>&1; return $rc;;
+    allow) # the output goes to the content store with the command (PD-50): last 16 KiB, stdout and stderr together
+           local out; out=$(mktemp /tmp/agl-out.XXXXXX)
+           bash -c "$cmd" 2>&1 | tee "$out"; local rc=${PIPESTATUS[0]}
+           curl -fsS -X POST "$AGL_GATEWAY/agl/sandbox/action/result" -H "Authorization: Bearer $AGL_TOKEN" -H 'content-type: application/json' \
+             --data "$(jq -cn --arg id "$(echo "$resp" | jq -r .event_id)" --argjson rc $rc --rawfile o <(tail -c 16384 "$out") '{event_id:$id, exit_code:$rc, output:$o}')" >/dev/null 2>&1
+           rm -f "$out"; return $rc;;
     require_human) echo "[agl] needs a human: $(echo "$resp" | jq -r '.reasons|join(",")') — not executed by the agent; a developer runs it from the PR flow or security relaxes the rule via a policy PR (event $(echo "$resp" | jq -r .event_id))"; return 98;;
     *) echo "[agl] denied: $(echo "$resp" | jq -r '.reasons|join(",")') (event $(echo "$resp" | jq -r .event_id))"; return 99;;
   esac

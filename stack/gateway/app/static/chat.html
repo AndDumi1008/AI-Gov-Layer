@@ -69,7 +69,7 @@ The model has no access to the gateway's data: it cannot list your events or bud
 <aside id="side"><h2>Runbook</h2><p class="sub">Connect to see what this identity can and cannot do. The list is computed from the identity's roles, team budget, training, the model registry and the repository gates, the same inputs the policy uses.</p></aside>
 </div>
 <footer>
-  <div class="row">
+  <div class="row" id="controls">
     <label>Classification<select id="cls"><option>PUBLIC</option><option selected>INTERNAL</option><option>CONFIDENTIAL</option><option>RESTRICTED</option></select></label>
     <label>Repository context<select id="repo"><option value="">none</option><option>shortandsweet/booking-svc</option><option>shortandsweet/app-x</option><option>shortandsweet/payments-db</option></select></label>
     <label>Model<select id="model"><option>code-local</option></select></label>
@@ -83,7 +83,7 @@ The model has no access to the gateway's data: it cannot list your events or bud
 <script>
 (() => {
 const $ = id => document.getElementById(id);
-let token = null, me = null;
+let token = null, me = null, isClient = false;
 try { token = localStorage.getItem('agl_token'); } catch {}
 const api = (path, opt={}) => fetch(path, {...opt, headers: {'content-type':'application/json', ...(token?{'authorization':'Bearer '+token}:{}), ...(opt.headers||{})}});
 
@@ -95,6 +95,10 @@ async function loadUsers(){
 async function whoami(){
   const r = await api('/agl/whoami'); if(!r.ok){ token=null; try{localStorage.removeItem('agl_token')}catch{}; return false; }
   me = await r.json();
+  // a client asks product questions only (PD-51): no classification, repository or model choice; the gateway builds the prompt
+  isClient = (me.roles||[]).includes('client') && !(me.roles||[]).includes('developer');
+  $('controls').querySelectorAll('label').forEach(l => l.hidden = isClient);
+  $('prompt').placeholder = isClient ? 'Ask what the platform can do today, e.g. "Do we block personal data in prompts?" · /features lists everything' : 'Ask the model… or ask the gateway: /events, /why <id>, /models, /repos, /budget, /features';
   const b = me.budget||{}; const t=b.team, o=b.org;
   const pct = x => x? `${x.pct.toFixed(0)}% of €${x.amount_eur.toFixed(2)}` : 'none';
   $('who').innerHTML = `<span>Connected as <b>${me.display_name||me.subject}</b></span>
@@ -109,6 +113,7 @@ async function whoami(){
   return true;
 }
 async function renderSide(){
+  if(isClient) return renderClientSide();
   const [mr, rr] = await Promise.all([api('/agl/models'), api('/agl/repos')]);
   const models = mr.ok ? (await mr.json()).models : []; const repos = rr.ok ? (await rr.json()).repositories : [];
   const roles = new Set(me.roles||[]); const has = (...r) => r.some(x=>roles.has(x));
@@ -121,10 +126,11 @@ async function renderSide(){
   if(exhausted) blockers.push(li('no','Every request is blocked: budget used up','BUDGET_EXHAUSTED · a team lead can request a top-up'));
   const ask = blockers.length ? blockers : [
     li('can','Ask with PUBLIC or INTERNAL data', `models: ${models.filter(m=>['approved','restricted'].includes(m.status)||m.active_exception).map(m=>`<span class="mono">${m.alias}</span> (${m.residency.replaceAll('_',' ').toLowerCase()}${m.active_exception?', under exception':''})`).join(' · ')}`),
-    li('cond','Ask with CONFIDENTIAL data', `answered only by the self-hosted tier (<span class="mono">${(models.find(m=>m.residency==='EU_SELF_HOSTED')||{}).alias||'none'}</span>); the external model is never used, the prompt text is never stored`),
+    li('cond','Ask with CONFIDENTIAL data', `answered only by the self-hosted tier (<span class="mono">${(models.find(m=>m.residency==='EU_SELF_HOSTED')||{}).alias||'none'}</span>); no other model is ever used`),
     li('no','Send RESTRICTED data to any model','production data, secrets, special-category personal data'),
     li('no','Send a credential or key','the request is blocked before it leaves and security is notified'),
-    li('cond','Include personal data (emails, phones, IBANs)','redacted before the model sees it; restored in the answer'),
+    li('no','Include someone’s personal data (emails, phones, IBANs)','blocked before anything is sent; your own address and test domains (example.com, *.test) are allowed'),
+    li('cond','Your prompts and answers are stored','encrypted, 30 days; reading one takes two people (one asks with a reason, another approves), every read logged; the DPO can erase them'),
     li('no','Reach a model outside the registry or outside the EU','registry, policy and the egress network each refuse it'),
     li((b.team&&b.team.pct>=80)?'cond':'can', `Spend: team ${b.team?b.team.pct.toFixed(0)+'% of €'+b.team.amount_eur.toFixed(2):'—'} · org ${b.org?b.org.pct.toFixed(0)+'% of €'+b.org.amount_eur.toFixed(2):'—'}`, 'hard stop at 100 %; warning header from 80 %'),
   ];
@@ -147,6 +153,19 @@ async function renderSide(){
   ];
   $('side').innerHTML = `<h2>Runbook for <b>${me.display_name||me.subject}</b></h2><p class="sub">team ${me.team||'—'} · roles ${(me.roles||[]).join(', ')||'none'}</p>`
     + sec('Asking', ask) + sec('Repositories', repoItems) + sec('Actions', acts);
+}
+async function renderClientSide(){
+  const li = (k, t, sub='') => `<li class="${k}"><span class="i">${k==='can'?'✓':k==='no'?'✕':'!'}</span><span>${t}${sub?`<div class="sub">${sub}</div>`:''}</span></li>`;
+  const b = me.budget||{};
+  $('side').innerHTML = `<h2>Runbook for <b>${me.display_name||me.subject}</b></h2><p class="sub">client account · team ${me.team||'—'}</p><section><h2>Asking</h2><ul>`
+    + li('can','Ask what the platform can do today','“Is X active?”, “Can we already do Y?” Answers come from the feature catalog and the latest verification run')
+    + li('can','List every feature and its status','/features, answered by the gateway without a model')
+    + li('no','Send free prompts, code or repository context','client accounts ask product questions only (CLIENT_SCOPE)')
+    + li('no','See source code or production data','the model sees only the catalog; it has no access to code or production')
+    + li('no','Include someone’s personal data','blocked before anything is sent')
+    + li('cond','Your questions and answers are stored','encrypted, 30 days; reading one takes two people, every read logged')
+    + li((b.team&&b.team.pct>=80)?'cond':'can', `Spend: ${b.team?b.team.pct.toFixed(0)+'% of €'+b.team.amount_eur.toFixed(2):'—'}`, 'hard stop at 100 %')
+    + `</ul></section>`;
 }
 $('login').addEventListener('submit', async e => {
   e.preventDefault();
@@ -192,7 +211,7 @@ const CMDS = {
     <li><code>/why &lt;event id&gt;</code> full event with the policy explanation</li>
     <li><code>/models</code> registry: status, region, residency, ceiling, exception</li>
     <li><code>/repos</code> repositories, classification and quarantine gate</li>
-    <li><code>/budget</code> team and org envelopes</li><li><code>/whoami</code> identity, roles, training</li><li><code>/datasets</code> mountable datasets</li></ul>`,
+    <li><code>/budget</code> team and org envelopes</li><li><code>/whoami</code> identity, roles, training</li><li><code>/datasets</code> mountable datasets</li><li><code>/features</code> the feature catalog: what the platform does today, with the checks that prove it</li></ul>`,
   whoami: async () => { const j = await (await api('/agl/whoami')).json(); return `<pre>${esc(JSON.stringify(j,null,2))}</pre>`; },
   budget: async () => { const j = await (await api('/agl/budget')).json();
     return table([{h:'scope',k:'scope'},{h:'envelope €',f:r=>r.v?r.v.amount_eur.toFixed(2):'—'},{h:'consumed €',f:r=>r.v?r.v.consumed_eur.toFixed(4):'—'},{h:'used',f:r=>r.v?r.v.pct.toFixed(1)+' %':'none'}], Object.entries(j).map(([scope,v])=>({scope,v}))); },
@@ -200,6 +219,10 @@ const CMDS = {
     return table([{h:'alias',k:'alias',mono:true},{h:'status',k:'status'},{h:'provider',k:'provider'},{h:'region',k:'region'},{h:'residency',k:'residency',mono:true},{h:'ceiling',k:'classification_ceiling'},{h:'exception',f:r=>r.active_exception?'active':''}], j.models); },
   repos: async () => { const j = await (await api('/agl/repos')).json();
     return table([{h:'repository',k:'full_name',mono:true},{h:'class',k:'classification'},{h:'AI exposure',k:'ai_exposure'},{h:'open gate items',f:r=>esc((r.open_items||[]).join(', '))},{h:'signed',f:r=>[r.signed_security?'security':'',r.signed_owner?'owner':''].filter(Boolean).join(' + ')}], j.repositories); },
+  features: async () => { const r = await api('/agl/features'); const j = await r.json(); if(!r.ok) return `<pre>${esc(JSON.stringify(j,null,2))}</pre>`;
+    const run = j.last_run ? `latest verification run ${esc(j.last_run.run_id)}: ${esc(j.last_run.result||'—')} at ${esc(String(j.last_run.finished_at).replace('T',' ').slice(0,19))}` : 'no verification run recorded yet';
+    const st = {active:'ok', partial:'warn', planned:'', out_of_scope:'bad'};
+    return `<p class="sub">${esc(j.catalog)} · updated ${esc(j.updated)} · ${run}</p>` + table([{h:'feature',f:r=>`<b>${esc(r.name)}</b><div class="sub">${esc(r.what)}${r.note?' · '+esc(r.note):''}</div>`},{h:'status',f:r=>chip(st[r.status]||'', esc(r.status))},{h:'proven by',f:r=>esc((r.evidence||[]).join(', '))},{h:'id',k:'id',mono:true}], j.features); },
   datasets: async () => { const j = await (await api('/agl/datasets')).json();
     return table([{h:'dataset',k:'name',mono:true},{h:'origin',k:'origin'},{h:'mountable',f:r=>r.mountable?'yes':'no'},{h:'repository',k:'repository',mono:true}], j.datasets); },
   events: async (args) => { const n = parseInt(args[0])||20; const type = args[1]?`&type=${encodeURIComponent(args[1])}`:'';
@@ -221,11 +244,12 @@ async function send(){
   const q = $('prompt').value.trim(); if(!q) return;
   if(q.startsWith('/')){ $('prompt').value=''; await command(q); whoami(); return; }
   const cls=$('cls').value, repo=$('repo').value, model=$('model').value;
-  add('user', q, `<b>${me.display_name||me.subject}</b> ${chip('', cls)} ${repo?chip('', repo):''} ${chip('', '→ '+model)}`);
+  add('user', q, isClient ? `<b>${me.display_name||me.subject}</b> ${chip('', 'product question')}` : `<b>${me.display_name||me.subject}</b> ${chip('', cls)} ${repo?chip('', repo):''} ${chip('', '→ '+model)}`);
   $('prompt').value=''; $('send').disabled=true;
   const headers = {'x-agl-classification': cls, 'x-agl-client': 'web-chat'}; if(repo) headers['x-agl-repo']=repo;
   let r; try {
-    r = await api('/v1/chat/completions', {method:'POST', headers, body: JSON.stringify({model, max_tokens: 600, messages:[{role:'user', content:q}]})});
+    r = isClient ? await api('/agl/ask', {method:'POST', headers: {'x-agl-client': 'web-chat-client'}, body: JSON.stringify({question: q})})
+                 : await api('/v1/chat/completions', {method:'POST', headers, body: JSON.stringify({model, max_tokens: 600, messages:[{role:'user', content:q}]})});
   } catch(e){ add('block', 'Gateway unreachable: '+e); $('send').disabled=false; return; }
   const h = n => r.headers.get(n) || '';
   const evId = h('x-agl-event'), decision = h('x-agl-decision'), reasons = h('x-agl-reasons');
@@ -235,12 +259,13 @@ async function send(){
     const err = j.error || j; const extra = [];
     if(err.open_gate_items) extra.push('open gate items: '+err.open_gate_items.join(', '));
     if(err.allowed_models) extra.push('allowed models: '+err.allowed_models.join(', '));
+    if(err.findings) extra.push('found: '+err.findings.map(f=>`${f.count} × ${f.type}`).join(', ')+' (values are never recorded)');
     add('block', (err.message||JSON.stringify(j)) + (extra.length? '\n'+extra.join('\n'):''), `${chip('bad', decision||'block')} ${reasons.split(',').filter(Boolean).map(x=>chip('bad', x)).join(' ')}`, evLink);
   } else {
     const text = j.choices?.[0]?.message?.content ?? JSON.stringify(j);
-    const dec = decision==='allow'?'ok':decision==='redact'?'warn':decision==='reroute'?'eu':'';
-    const meta = `${chip(dec, decision)} ${reasons.split(',').filter(Boolean).map(x=>chip(x.includes('WARNING')?'warn':x.includes('REDACT')?'warn':x.includes('REROUTE')?'eu':'', x)).join(' ')}
-      ${chip('eu', 'model '+h('x-agl-model')+(h('x-agl-rerouted')?' (rerouted)':''))} ${chip('', '€'+h('x-agl-cost-eur'))} ${h('x-agl-warning')?chip('warn', h('x-agl-warning')):''}`;
+    const dec = decision==='allow'?'ok':decision==='reroute'?'eu':'';
+    const meta = `${chip(dec, decision)} ${reasons.split(',').filter(Boolean).map(x=>chip(x.includes('WARNING')?'warn':x.includes('REROUTE')?'eu':'', x)).join(' ')}
+      ${chip('eu', 'model '+h('x-agl-model')+(h('x-agl-rerouted')?' (rerouted)':''))} ${chip('', '€'+h('x-agl-cost-eur'))} ${h('x-agl-content')?chip('', 'prompt '+h('x-agl-content')):''} ${h('x-agl-warning')?chip('warn', h('x-agl-warning')):''}`;
     add('ai', md(text), meta, evLink, true);
   }
   $('send').disabled=false; whoami();

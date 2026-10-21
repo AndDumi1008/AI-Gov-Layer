@@ -4,7 +4,7 @@ from decimal import Decimal
 from fastapi import FastAPI, Request, Header, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse, FileResponse, RedirectResponse
 import os as _os
-from . import config, db, auth, dlp, policy, ledger, audit, formats, providers, runs, scm, canaries
+from . import config, db, auth, dlp, policy, ledger, audit, formats, providers, runs, scm, content, catalog, canaries
 
 app = FastAPI(title="AGL gateway", version="0.1.0")
 
@@ -20,6 +20,9 @@ async def _run_correlation(request: Request, call_next):
 
 MESSAGES = {
     "SECRET_DETECTED": ("A credential pattern was found in your prompt. Remove it or replace it with a placeholder. If the key is real, rotate it now.", 403),
+    "PII_DETECTED": ("Personal data (an email address, phone number or IBAN) was found in your prompt, so nothing was sent. Remove it or use a placeholder such as <EMAIL>. Your own address and addresses on test domains (example.com, *.test) are allowed.", 403),
+    "CLIENT_SCOPE": ("Client accounts can ask product questions only (agl product-ask, or the chat). Free prompts, code and repository context are not available to clients.", 403),
+    "CATALOG_UNAVAILABLE": ("The feature catalog that product questions are answered from is unavailable.", 503),
     "RESTRICTED_DATA": ("This request is classified RESTRICTED (production data, secrets, special-category personal data). Nothing RESTRICTED is ever sent to an AI model.", 403),
     "REPO_QUARANTINED": ("This repository is quarantined from AI until its gate items are satisfied and signed off (agl repo show <name>).", 403),
     "CLASSIFICATION_CEILING": ("The requested model is not approved for this data classification. Use a model with a higher ceiling (agl models).", 403),
@@ -41,6 +44,7 @@ MESSAGES = {
 def _startup():
     db.open_pool()
     audit.start()          # also recovers hot-copy events that never reached a WORM segment (PD-47)
+    content.start(lambda t, b, **kw: audit.chain.append(t, b, **kw))   # retention: expired bodies removed, count audited (PD-50)
 
 @app.on_event("shutdown")
 def _shutdown():
@@ -91,7 +95,7 @@ def identity_from_request(authorization: str | None, x_api_key: str | None = Non
         raise AuthError("UNKNOWN_IDENTITY", f"No identity for subject '{sub}'.", 403)
     ident = {"id": str(row["id"]), "subject": row["subject"], "kind": claims.get("kind", "human"), "status": row["status"],
              "team_id": str(row["team_id"]) if row["team_id"] else None, "team": row["team_name"], "cost_centre": row["cost_centre"],
-             "training_completed": row["training_completed_at"] is not None, "display_name": row["display_name"],
+             "training_completed": row["training_completed_at"] is not None, "display_name": row["display_name"], "email": row["email"],
              "claims": claims, "delegation_valid": True}
     if claims.get("kind") == "agent":
         d = db.one("select * from delegated_identity where id=%s", (claims.get("delegation_id"),))
@@ -146,7 +150,8 @@ def err(surface: str, code: str, event_id: str | None, extra: dict | None = None
     return JSONResponse(body, status_code=status, headers=headers)
 
 # ---------- the door
-def handle(surface: str, body: dict, authorization, x_api_key, x_agl_classification, x_agl_repo, x_agl_client):
+def handle(surface: str, body: dict, authorization, x_api_key, x_agl_classification, x_agl_repo, x_agl_client, mode: str = "model"):
+    """mode: "model" for the model surfaces; "product_qa" only for /agl/ask, which builds the prompt itself (PD-51)."""
     try:
         ident = identity_from_request(authorization, x_api_key)
     except AuthError as e:
@@ -169,14 +174,16 @@ def handle(surface: str, body: dict, authorization, x_api_key, x_agl_classificat
     ep = endpoint_by_alias(alias)
     local_ep = endpoint_by_alias(config.LOCAL_ALIAS)
     text = formats.all_text(req)
-    scan = dlp.scan(text)
+    scan = dlp.scan(text, own_values=(ident.get("email"),))   # the caller's own address is not someone else's data (PD-49)
     client_type = x_agl_client or ("agent" if ident["kind"] == "agent" else "cli")
 
     try:
         budget = ledger.state(ident["team_id"])
         exceptions = active_exceptions()
         pin = {
-            "identity": {"sub": ident["subject"], "kind": ident["kind"], "status": ident["status"], "training_completed": ident["training_completed"], "delegation_valid": ident["delegation_valid"]},
+            "identity": {"sub": ident["subject"], "kind": ident["kind"], "status": ident["status"], "training_completed": ident["training_completed"], "delegation_valid": ident["delegation_valid"],
+                         "roles": sorted(roles_of(ident["id"]))},
+            "request": {"mode": mode},
             "classification": classification,
             "model": {"alias": ep["alias"], "status": ep["status"], "ceiling": ep["classification_ceiling"], "residency": ep["residency"]} if ep else {"alias": alias, "status": "unknown", "ceiling": "PUBLIC", "residency": "none"},
             "local_model": {"alias": local_ep["alias"], "status": local_ep["status"], "ceiling": local_ep["classification_ceiling"], "residency": local_ep["residency"]} if local_ep else None,
@@ -201,6 +208,7 @@ def handle(surface: str, body: dict, authorization, x_api_key, x_agl_classificat
         ev = audit.chain.append("request", {
             "request_id": request_id, "surface": surface, "actor": actor, "model": model_doc,
             "classification": {"declared": x_agl_classification, "effective": classification, "source": cls_source, "repo": repo["full_name"] if repo else None},
+            "mode": mode,
             "dlp": scan.summary(), "decision": {k: decision[k] for k in ("outcome", "reasons", "reroute_to", "exception_id", "obligations")},
             "budget": {k: ({"pct": v["pct"]} if v else None) for k, v in budget.items()}, "fingerprints": {"prompt_sha256": fingerprint(text)}},
             actor_identity_id=ident["id"], team_id=ident["team_id"], model_endpoint_id=str(target["id"]) if target else None,
@@ -211,6 +219,8 @@ def handle(surface: str, body: dict, authorization, x_api_key, x_agl_classificat
     if decision["outcome"] == "block":
         code = "NON_EU_ENDPOINT" if "NON_EU_ENDPOINT" in decision["reasons"] else next((r for r in decision["reasons"] if r in MESSAGES), decision["reasons"][0] if decision["reasons"] else "BLOCKED")
         extra = {"reasons": decision["reasons"], "classification": classification}
+        if code in ("SECRET_DETECTED", "PII_DETECTED"):
+            extra["findings"] = [{"type": f["type"], "count": f["count"]} for f in scan.summary()["findings"]]   # types and counts, never values
         if code == "REPO_QUARANTINED" and repo:
             g = db.one("select * from repository_ai_gate where repository_id=%s", (repo["id"],))
             if g:
@@ -219,16 +229,19 @@ def handle(surface: str, body: dict, authorization, x_api_key, x_agl_classificat
             extra["allowed_models"] = [r["alias"] for r in db.all_("select alias from model_endpoint where status in ('approved','restricted') and classification_ceiling::text >= %s", (classification,))]
         return err(surface, code, ev["event_id"], extra)
 
-    # redaction (PII) — reversible inside this request only
-    mapping: dict = {}
-    redacted = formats.apply_text(req, lambda s: dlp.redact(s, mapping)[0]) if decision.get("redact") else req
+    # No governance, no tool (D-05): a prompt that cannot be stored is not sent (PD-50). Checked before any spend.
+    log_content = bool(decision["obligations"].get("log_content"))
+    if log_content and not content.ready():
+        audit.chain.append("completion", {"request_id": request_id, "actor": actor, "model": model_doc, "error": "content store unavailable: no key", "usage": None},
+                           actor_identity_id=ident["id"], team_id=ident["team_id"], model_endpoint_id=str(target["id"]), outcome="error")
+        return err(surface, "GOVERNANCE_UNAVAILABLE", ev["event_id"], {"detail": "content store unavailable: the prompt could not be stored, so it was not sent"})
 
-    # budget reserve → call → settle
+    # budget reserve → call → settle. Nothing is rewritten on the way out: personal data blocks the request (PD-49).
     price = ledger.price_for(str(target["id"]))
-    est = ledger.cost(price, max(1, len(text) // 4), redacted["max_tokens"])
+    est = ledger.cost(price, max(1, len(text) // 4), req["max_tokens"])
     rid = ledger.reserve(budget, est, request_id, ident["id"], str(target["id"]))
     try:
-        out = providers.call(target, req, redacted)
+        out = providers.call(target, req, req)
     except providers.BackendError as e:
         ledger.release(budget, rid, est, request_id, ident["id"], str(target["id"]))
         audit.chain.append("completion", {"request_id": request_id, "actor": actor, "model": model_doc, "error": str(e)[:300], "usage": None},
@@ -236,12 +249,23 @@ def handle(surface: str, body: dict, authorization, x_api_key, x_agl_classificat
         return err(surface, "BACKEND_ERROR", ev["event_id"], {"detail": str(e)[:300]})
     actual = ledger.cost(price, out["input_tokens"], out["output_tokens"], out.get("cached_tokens", 0))
     ledger.settle(budget, rid, est, actual, request_id, ident["id"], str(target["id"]), out["input_tokens"], out["output_tokens"], out.get("cached_tokens", 0))
-    final_text = dlp.restore(out["text"], mapping) if mapping else out["text"]
+    final_text = out["text"]
+    stored = False
+    if log_content:
+        try:
+            content.store("completion", ev["event_id"], ident["id"], ident["team_id"], text, fingerprint(text), final_text, fingerprint(final_text))
+            stored = True
+        except content.ContentUnavailable as e:
+            audit.chain.append("completion", {"request_id": request_id, "actor": actor, "model": model_doc, "error": str(e)[:300],
+                               "usage": {"input_tokens": out["input_tokens"], "output_tokens": out["output_tokens"], "cost_eur": float(round(actual, 6))}},
+                               actor_identity_id=ident["id"], team_id=ident["team_id"], model_endpoint_id=str(target["id"]), outcome="error", cost_eur=actual)
+            return err(surface, "GOVERNANCE_UNAVAILABLE", ev["event_id"], {"detail": "content store unavailable: the answer is withheld because the exchange could not be stored"})
     audit.chain.append("completion", {
         "request_id": request_id, "actor": actor, "model": {**model_doc, "backend_model": out.get("model")},
         "usage": {"input_tokens": out["input_tokens"], "output_tokens": out["output_tokens"], "cached_tokens": out.get("cached_tokens", 0),
                   "cost_eur": float(round(actual, 6)), "reservation_id": rid, "provider_request_id": out.get("provider_request_id")},
-        "redactions_restored": len(mapping), "fingerprints": {"prompt_sha256": fingerprint(text), "response_sha256": fingerprint(final_text)}},
+        "content": {"stored": stored, "retention_days": config.CONTENT_RETENTION_DAYS if stored else None},
+        "fingerprints": {"prompt_sha256": fingerprint(text), "response_sha256": fingerprint(final_text)}},
         actor_identity_id=ident["id"], team_id=ident["team_id"], model_endpoint_id=str(target["id"]), outcome="completed", cost_eur=actual)
 
     usage = {"input_tokens": out["input_tokens"], "output_tokens": out["output_tokens"]}
@@ -249,6 +273,8 @@ def handle(surface: str, body: dict, authorization, x_api_key, x_agl_classificat
     resp = formats.render_openai(req, final_text, usage, model_label) if surface == "openai" else formats.render_anthropic(req, final_text, usage, model_label)
     headers = {"X-AGL-Event": ev["event_id"], "X-AGL-Decision": decision["outcome"], "X-AGL-Reasons": ",".join(decision["reasons"]), "X-AGL-Model": target["alias"],
                "X-AGL-Cost-EUR": f"{actual:.6f}"}
+    if stored:
+        headers["X-AGL-Content"] = f"stored {config.CONTENT_RETENTION_DAYS}d"
     if decision["outcome"] == "reroute":
         headers["X-AGL-Rerouted"] = target["alias"]
     if budget.get("team") and budget["team"]["pct"] >= 80:
@@ -267,6 +293,32 @@ async def openai_chat(request: Request, authorization: str | None = Header(None)
 async def anthropic_messages(request: Request, authorization: str | None = Header(None), x_api_key: str | None = Header(None),
                              x_agl_classification: str | None = Header(None), x_agl_repo: str | None = Header(None), x_agl_client: str | None = Header(None)):
     return handle("anthropic", await request.json(), authorization, x_api_key, x_agl_classification, x_agl_repo, x_agl_client)
+
+# ---------- client product questions (PD-51): the gateway builds the prompt from the feature catalog
+@app.post("/agl/ask")
+async def ask_product(request: Request, authorization: str | None = Header(None), x_api_key: str | None = Header(None), x_agl_client: str | None = Header(None)):
+    b = await request.json() if await request.body() else {}
+    q = str(b.get("question") or "").strip()
+    if not q:
+        return JSONResponse(formats.error_body("openai", 400, "BAD_REQUEST", "question is required", None), status_code=400)
+    try:
+        prompt = catalog.system_prompt(catalog.load(), catalog.last_run())
+    except catalog.CatalogUnavailable as e:
+        return err("openai", "CATALOG_UNAVAILABLE", None, {"detail": str(e)[:200]})
+    except Exception as e:  # DB down → fail closed
+        return err("openai", "GOVERNANCE_UNAVAILABLE", None, {"detail": str(e)[:200]})
+    body = {"model": config.LOCAL_ALIAS, "max_tokens": 600, "messages": [{"role": "system", "content": prompt}, {"role": "user", "content": q}]}
+    return handle("openai", body, authorization, x_api_key, "INTERNAL", None, x_agl_client or "product-qa", mode="product_qa")
+
+@app.get("/agl/features")
+def features(authorization: str | None = Header(None)):
+    """The catalog itself, answered by the gateway (no model): what clients' questions are answered from."""
+    _ident(authorization)
+    try:
+        cat = catalog.load()
+    except catalog.CatalogUnavailable as e:
+        raise HTTPException(503, {"code": "CATALOG_UNAVAILABLE", "message": str(e)[:200]})
+    return {**cat, "last_run": catalog.last_run()}
 
 @app.get("/v1/models")
 def list_models(authorization: str | None = Header(None)):
@@ -482,16 +534,31 @@ async def sandbox_action(request: Request, authorization: str | None = Header(No
         a = policy.action({"command": cmd, "identity": {"sub": i["subject"], "kind": i["kind"]}, "sandbox": i.get("sandbox_id"), "repo": i.get("repo")})
     except policy.GovernanceUnavailable as e:
         raise HTTPException(503, {"code": "GOVERNANCE_UNAVAILABLE", "message": str(e)})
+    if not content.ready():   # an action that cannot be stored is not run (PD-50); agl-shell treats 503 as "not executed"
+        raise HTTPException(503, {"code": "GOVERNANCE_UNAVAILABLE", "message": "content store unavailable: the command could not be stored, so it was not authorised"})
     ev_type = {"allow": "agent_action_requested", "deny": "agent_action_denied", "require_human": "agent_action_requested"}[a["outcome"]]
     ev = audit.chain.append(ev_type, {"sandbox_id": i.get("sandbox_id"), "principal": i["subject"], "tool": i.get("tool"), "command_sha256": fingerprint(cmd),
-                            "command_preview": cmd[:120], "decision": a}, actor_identity_id=i["id"], team_id=i["team_id"], outcome=a["outcome"], reasons=a["reasons"])
+                            "decision": a, "content": {"stored": True, "retention_days": config.CONTENT_RETENTION_DAYS}},
+                            actor_identity_id=i["id"], team_id=i["team_id"], outcome=a["outcome"], reasons=a["reasons"])
+    try:
+        content.store("agent_action", ev["event_id"], i["id"], i["team_id"], cmd, fingerprint(cmd))
+    except content.ContentUnavailable as e:
+        raise HTTPException(503, {"code": "GOVERNANCE_UNAVAILABLE", "message": str(e), "event_id": ev["event_id"]})
     return {"outcome": a["outcome"], "reasons": a["reasons"], "event_id": ev["event_id"]}
 
 @app.post("/agl/sandbox/action/result")
 async def sandbox_action_result(request: Request, authorization: str | None = Header(None)):
     i = _ident(authorization)
     b = await request.json()
-    ev = audit.chain.append("agent_action_executed", {"sandbox_id": i.get("sandbox_id"), "requested_event_id": b.get("event_id"), "exit_code": b.get("exit_code")},
+    output = b.get("output")
+    stored = 0
+    if isinstance(output, str) and b.get("event_id"):
+        try:
+            stored = content.add_response(b["event_id"], i["id"], i["team_id"], output, fingerprint(output))
+        except Exception as e:  # noqa: the command already ran; record that its output could not be kept
+            print("content: output not stored:", e)
+    ev = audit.chain.append("agent_action_executed", {"sandbox_id": i.get("sandbox_id"), "requested_event_id": b.get("event_id"), "exit_code": b.get("exit_code"),
+                            "output_sha256": fingerprint(output) if isinstance(output, str) else None, "output_stored": bool(stored)},
                             actor_identity_id=i["id"], team_id=i["team_id"], outcome="executed")
     return {"event_id": ev["event_id"]}
 
@@ -501,6 +568,95 @@ def sandbox_destroyed(sandbox_id: str, authorization: str | None = Header(None))
     db.run("update delegated_identity set revoked_at=now() where sandbox_id=%s and revoked_at is null", (sandbox_id,))
     ev = audit.chain.append("sandbox_destroyed", {"sandbox_id": sandbox_id, "by": i["subject"]}, actor_identity_id=i["id"], outcome="destroyed")
     return {"event_id": ev["event_id"]}
+
+# ---------- content store (PD-50): reading takes two people (T-CNT-04); requests, approvals, reads and erasures are audit events
+CONTENT_REQUESTERS = {"security_admin", "dpo"}
+CONTENT_APPROVERS = {"security_admin", "dpo", "team_lead"}
+
+def _event_uuid(event_id: str) -> str:
+    try:
+        return str(uuid.UUID(event_id))
+    except ValueError:
+        raise HTTPException(404, {"code": "NOT_STORED", "message": "not an event id"})
+
+@app.post("/agl/content/access")
+async def content_access_request(request: Request, authorization: str | None = Header(None)):
+    """Step 1 of 2: ask to read what was stored for one request event, stating why."""
+    i = _ident(authorization)
+    if not roles_of(i["id"]) & CONTENT_REQUESTERS:
+        raise HTTPException(403, {"code": "FORBIDDEN", "message": f"only {sorted(CONTENT_REQUESTERS)} may ask to read stored prompts"})
+    b = await request.json()
+    event_id, reason = _event_uuid(str(b.get("event_id") or "")), str(b.get("reason") or "").strip()
+    if len(reason) < 10:
+        raise HTTPException(400, {"code": "REASON_REQUIRED", "message": "state why you need to read it (reason, at least 10 characters); it is recorded"})
+    if not content.stored(event_id):
+        ev = audit.chain.append("content_access_requested", {"event_id": event_id, "by": i["subject"], "reason": reason[:300], "stored": False},
+                                actor_identity_id=i["id"], outcome="not_stored")
+        raise HTTPException(404, {"code": "NOT_STORED", "message": "nothing stored for this event (blocked requests are never stored)", "audit_event_id": ev["event_id"]})
+    r = content.request_access(event_id, i["id"], reason)
+    ev = audit.chain.append("content_access_requested", {"request_id": r["request_id"], "event_id": event_id, "by": i["subject"], "reason": reason[:300], "stored": True},
+                            actor_identity_id=i["id"], outcome="open")
+    return {**r, "event_id": event_id, "audit_event_id": ev["event_id"], "next": "a second person approves: agl content approve " + r["request_id"]}
+
+@app.post("/agl/content/access/{request_id}/approve")
+def content_access_approve(request_id: str, authorization: str | None = Header(None)):
+    """Step 2 of 2: a different person approves; the requester may then read for 24 hours."""
+    i = _ident(authorization)
+    if not roles_of(i["id"]) & CONTENT_APPROVERS:
+        raise HTTPException(403, {"code": "FORBIDDEN", "message": f"only {sorted(CONTENT_APPROVERS)} may approve reading stored prompts"})
+    try:
+        uuid.UUID(request_id)
+        r = content.approve_access(request_id, i["id"])
+    except ValueError:
+        raise HTTPException(404, {"code": "NOT_FOUND", "message": "not a request id"})
+    except content.AccessRefused as e:
+        raise HTTPException(e.status, {"code": e.code, "message": str(e)})
+    ev = audit.chain.append("content_access_approved", {"request_id": request_id, "event_id": r["event_id"], "approved_by": i["subject"], "expires_at": r["expires_at"]},
+                            actor_identity_id=i["id"], outcome="approved")
+    return {**r, "audit_event_id": ev["event_id"]}
+
+@app.get("/agl/content/{event_id}")
+def content_show(event_id: str, authorization: str | None = Header(None), access: str = ""):
+    i = _ident(authorization)
+    event_id = _event_uuid(event_id)
+    if not access:
+        raise HTTPException(403, {"code": "ACCESS_NOT_APPROVED", "message": "reading a stored prompt takes two people: agl content request <event> --reason …, then a second person approves"})
+    try:
+        a = content.approved_access(str(uuid.UUID(access)), event_id, i["id"])
+        records = content.read(event_id)
+    except ValueError:
+        raise HTTPException(403, {"code": "ACCESS_NOT_APPROVED", "message": "not an access request id"})
+    except content.AccessRefused as e:
+        raise HTTPException(e.status, {"code": e.code, "message": str(e)})
+    except content.ContentUnavailable as e:
+        raise HTTPException(503, {"code": "GOVERNANCE_UNAVAILABLE", "message": str(e)})
+    ev = audit.chain.append("content_access", {"event_id": event_id, "request_id": a["request_id"], "by": a["requester"], "approved_by": a["approver"],
+                            "reason": a["reason"][:300], "records": len(records)}, actor_identity_id=i["id"], outcome="read")
+    return {"event_id": event_id, "records": records, "access": a, "audit_event_id": ev["event_id"]}
+
+@app.post("/agl/content/erase")
+async def content_erase(request: Request, authorization: str | None = Header(None)):
+    """GDPR erasure (F-11): by request event or by person. Bodies are removed; the row, its fingerprints and the
+    audit chain stay, so the erasure itself is provable."""
+    i = _ident(authorization)
+    require_role(i, "dpo")
+    b = await request.json()
+    reason = str(b.get("reason") or "").strip()
+    if len(reason) < 10:
+        raise HTTPException(400, {"code": "REASON_REQUIRED", "message": "state the legal basis or request reference (reason, at least 10 characters)"})
+    event_id, subject_id, subject = b.get("event_id"), None, b.get("subject")
+    if subject:
+        r = db.one("select id from identity where subject=%s", (subject,))
+        if not r:
+            raise HTTPException(404, {"code": "UNKNOWN_IDENTITY", "message": subject})
+        subject_id = str(r["id"])
+    if not (event_id or subject_id):
+        raise HTTPException(400, {"code": "BAD_REQUEST", "message": "event_id or subject"})
+    n = content.erasable(event_id=event_id, identity_id=subject_id)
+    ev = audit.chain.append("content_erased", {"by": i["subject"], "reason": reason[:300], "event_id": event_id, "subject": subject, "records": n},
+                            actor_identity_id=i["id"], outcome="erased")
+    erased = content.erase(ev["event_id"], i["id"], event_id=event_id, identity_id=subject_id)
+    return {"erased": erased, "event_id": ev["event_id"]}
 
 # ---------- demo reset (PoC only: available while the dev issuer is on)
 @app.post("/agl/admin/demo-reset")

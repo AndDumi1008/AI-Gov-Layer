@@ -4,8 +4,12 @@ import json, re, sys, html, pathlib, datetime as dt
 
 MAP = {  # scenario → (proof, control it demonstrates, ISO 27001:2022 Annex A)
  "S1":  ("Governed by default", "Every call authenticated, classified, metered and logged", "A.5.14, A.8.15"),
- "S2a": ("PR-3 EU only / privacy", "Personal data redacted before the prompt leaves; model sees placeholders", "A.5.34, A.8.12"),
- "S2b": ("PR-3", "Model-side view shows placeholders (mock tier only)", "A.8.12"),
+ "S2a": ("PR-3 EU only / privacy", "Someone else's personal data blocks the request; nothing is sent (PD-49)", "A.5.34, A.8.12"),
+ "S2b": ("PR-3", "The model never received the blocked prompt (mock tier only)", "A.8.12"),
+ "S30a":("Privacy", "The caller's own registered address is allowed", "A.5.34"),
+ "S30b":("Privacy", "The exemption is recorded as a count (own_identity), never as a value", "A.5.34, A.8.15"),
+ "S31a":("Privacy", "Addresses on reserved test domains are allowed", "A.5.34"),
+ "S31b":("Privacy", "The exemption is recorded as a count (test_data)", "A.5.34, A.8.15"),
  "S3":  ("Data leakage", "Credential pattern blocks the request; security notified", "A.8.12, A.5.24"),
  "S4a": ("PR-3 EU only", "CONFIDENTIAL with Claude Code's model name served by the self-hosted tier", "A.5.12, A.5.23"),
  "S4b": ("PR-3 EU only", "The response itself names agl/code-local", "A.5.23"),
@@ -38,14 +42,26 @@ MAP = {  # scenario → (proof, control it demonstrates, ISO 27001:2022 Annex A)
  "S26": ("Policy as code", "Policy bundle unit tests pass", "A.8.9, A.8.25"),
  "S27": ("G6 Traceability", "Chain reconciled against GitHub's merge records: AI-Gov-Layer", "A.5.33, A.8.15, A.8.32"),
  "S27b":("G6 Traceability", "Chain reconciled against GitHub's merge records: parcel-app", "A.5.33, A.8.15, A.8.32"),
+ "S32a":("Content store", "Security asks to read S1's stored prompt, with a reason", "A.8.15, A.5.28"),
+ "S32b":("Content store", "Approving your own read request is refused", "A.5.3, A.8.2"),
+ "S32c":("Content store", "Nothing is readable before a second person approves", "A.5.15, A.8.3"),
+ "S32d":("Content store", "The DPO approves as the second person", "A.5.3"),
+ "S32e":("Content store", "The approved requester reads the stored prompt and answer", "A.8.15"),
+ "S32f":("Content store", "The read is itself an audit event, naming both people and the reason", "A.8.15, A.5.33"),
+ "S32g":("Content store", "A blocked request is never stored", "A.5.34, A.8.12"),
+ "S32h":("Content store", "Developers cannot ask to read stored prompts", "A.8.3, A.5.15"),
+ "S32i":("Content store", "The DPO erases stored content; the audit chain is untouched", "A.5.34, A.8.10"),
+ "S33": ("Client questions", "A client's product question is answered from the feature catalog by the self-hosted model", "A.5.10, A.8.3"),
+ "S34": ("Client questions", "A client cannot send free prompts to a model", "A.5.15, A.8.3"),
+ "S35": ("Client questions", "The feature catalog is listed by the gateway without a model", "A.5.10"),
 }
 
 def parse(log: str):
     rows, cur = [], None
     for line in log.splitlines():
-        m = re.match(r"^== (S\d+[ab]?)\s+(.*)$", line)
+        m = re.match(r"^== (S\d+[a-z]?)\s+(.*)$", line)
         if m: cur = (m.group(1), m.group(2)); continue
-        m = re.match(r"^\s+(PASS|FAIL|SKIP) (S\d+[ab]?)(.*)$", line)
+        m = re.match(r"^\s+(PASS|FAIL|SKIP) (S\d+[a-z]?)(.*)$", line)
         if m: rows.append({"id": m.group(2), "result": m.group(1), "title": cur[1] if cur else "", "note": m.group(3).strip(" ()")})
     return rows
 
@@ -111,8 +127,8 @@ th{{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut
 <table><tr><th>Proof</th><th>Statement</th><th>Scenarios</th></tr>
 <tr><td><b>PR-1 Quarantine</b></td><td>A repository is not exposed to AI until its gate items are met and two people sign off; it closes again automatically.</td><td class=mono>S6 S19–S23</td></tr>
 <tr><td><b>PR-2 Total budget</b></td><td>Org and team envelopes are hard caps; re-opening needs a second person.</td><td class=mono>S8 S9</td></tr>
-<tr><td><b>PR-3 EU only</b></td><td>Non-EU endpoints cannot be registered or reached; CONFIDENTIAL work stays on the self-hosted tier; personal data is redacted before any call.</td><td class=mono>S2 S4 S5 S14 S25 S27 S28 S29</td></tr>
-<tr><td><b>PR-4 Immutable</b></td><td>Audit records cannot be altered or deleted, by anyone, and tampering is detectable.</td><td class=mono>S10–S12</td></tr></table>
+<tr><td><b>PR-3 EU only</b></td><td>Non-EU endpoints cannot be registered or reached; CONFIDENTIAL work stays on the self-hosted tier; someone else's personal data blocks the request before any call.</td><td class=mono>S2 S4 S5 S14 S25 S27 S28 S29 S30 S31</td></tr>
+<tr><td><b>PR-4 Immutable</b></td><td>Audit records cannot be altered or deleted, by anyone, and tampering is detectable. Prompts, answers and agent commands are kept apart, encrypted, for 30 days; reading takes two people; reads and erasures are audited.</td><td class=mono>S10–S12 S32</td></tr></table>
 <h2>Scenario results</h2>
 <table><tr><th>ID</th><th>What was demonstrated</th><th>Proof</th><th>ISO 27001 Annex A</th><th>Result</th></tr>{trs}</table>
 <h2>Configuration in force (config_snapshot)</h2>{run_html}

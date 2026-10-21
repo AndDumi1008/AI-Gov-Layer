@@ -22,6 +22,11 @@ check(){ # check <name> <expected-substring> <actual>
   if echo "$3" | grep -qi -- "$2"; then echo "   PASS $1" | tee -a "$LOG"; pass=$((pass+1)); res=pass; else echo "   FAIL $1 (expected '$2')" | tee -a "$LOG"; echo "$3" | head -20 | tee -a "$LOG"; fail=$((fail+1)); res=fail; fi
   RESULTS=$(python3 -c "import json,sys;r=json.loads(sys.argv[1]);r.append({'id':sys.argv[2],'result':sys.argv[3],'expect':sys.argv[4][:80]});print(json.dumps(r))" "$RESULTS" "$1" "$res" "$2")
 }
+check_absent(){ # check_absent <name> <forbidden-substring> <actual>
+  if echo "$3" | grep -qi -- "$2"; then echo "   FAIL $1 (found '$2')" | tee -a "$LOG"; fail=$((fail+1)); res=fail; else echo "   PASS $1" | tee -a "$LOG"; pass=$((pass+1)); res=pass; fi
+  RESULTS=$(python3 -c "import json,sys;r=json.loads(sys.argv[1]);r.append({'id':sys.argv[2],'result':sys.argv[3],'expect':'absent: '+sys.argv[4][:72]});print(json.dumps(r))" "$RESULTS" "$1" "$res" "$2")
+}
+evid(){ echo "$1" | grep -o '"X-AGL-Event": "[^"]*"' | head -1 | cut -d'"' -f4; }
 as(){ # as <user> <cmd...>  → run CLI as user (separate token files)
   local u="$1"; shift; AGL_TOKEN_FILE="$EV/.tok-$u" $AGL login --as "$u" >/dev/null 2>&1; AGL_TOKEN_FILE="$EV/.tok-$u" $AGL "$@" 2>&1
 }
@@ -30,15 +35,24 @@ say "S1  normal INTERNAL prompt → allow"
 r=$(as dana ask "Write a function that parses an ISO date." -c INTERNAL -r shortandsweet/booking-svc); echo "$r" >> "$LOG"; check S1 '"X-AGL-Decision": "allow"' "$r"
 EV1=$(echo "$r" | grep -o '"X-AGL-Event": "[^"]*"' | cut -d'"' -f4)
 
-say "S2  two emails in prompt → redact, model saw placeholders"
-r=$(as dana ask "Email ana.popescu@example.ro and jonas.weber@example.de about the parcel." -c INTERNAL); echo "$r" >> "$LOG"; check S2a 'PII_REDACTED' "$r"
+say "S2  two emails of other people in prompt → block PII_DETECTED, nothing sent (PD-49)"
+r=$(as dana ask "Email ana.popescu@example.ro and jonas.weber@example.de about the parcel." -c INTERNAL); echo "$r" >> "$LOG"; check S2a 'PII_DETECTED' "$r"
+EV2=$(evid "$r")
 BACKEND=$(grep -E '^AGL_LOCAL_BACKEND_URL=' "$ENV_FILE" | cut -d= -f2); BACKEND=${BACKEND:-http://mock-model:8000}
 if echo "$BACKEND" | grep -q mock-model && docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^agl-mock-model-1$'; then
   seen=$(docker exec agl-mock-model-1 python3 -c "import urllib.request,json;print(json.load(urllib.request.urlopen('http://localhost:8000/debug/last'))['prompt'])" 2>/dev/null || echo "n/a")
-  echo "model saw: $seen" >> "$LOG"; check S2b '\[EMAIL_1\]' "$seen"
+  echo "model's last prompt: $seen" >> "$LOG"; check_absent S2b 'example.ro' "$seen"
 else
-  echo "   SKIP S2b (model backend is '$BACKEND' / mock not local: the model-side view is only inspectable on the mock; the redaction itself is proven by S2a and the response headers)" | tee -a "$LOG"
+  echo "   SKIP S2b (model backend is '$BACKEND' / mock not local: the model-side view is only inspectable on the mock; the block itself is proven by S2a)" | tee -a "$LOG"
 fi
+
+say "S30 the caller's own registered address → allowed, counted as own_identity (PD-49)"
+r=$(as dana ask "Send the summary to me at dana@example.test." -c INTERNAL); echo "$r" >> "$LOG"; check S30a '"X-AGL-Decision": "allow"' "$r"
+r=$(as dana why "$(evid "$r")"); echo "$r" >> "$LOG"; check S30b '"own_identity": 1' "$r"
+
+say "S31 addresses on reserved test domains → allowed, counted as test_data (PD-49)"
+r=$(as dana ask "Use qa.team@example.com and ops@billing.test in the fixture." -c INTERNAL); echo "$r" >> "$LOG"; check S31a '"X-AGL-Decision": "allow"' "$r"
+r=$(as dana why "$(evid "$r")"); echo "$r" >> "$LOG"; check S31b '"test_data": 2' "$r"
 
 say "S3  AWS key in prompt → block SECRET_DETECTED"
 r=$(as dana ask "Why does AKIAABCDEFGHIJKLMNOP fail with 403?" -c INTERNAL); echo "$r" >> "$LOG"; check S3 'SECRET_DETECTED' "$r"
@@ -144,6 +158,28 @@ SVC=$(echo "$BACKEND" | grep -q ollama && echo ollama || echo mock-model)
 docker compose -f stack/docker-compose.yml stop "$SVC" >/dev/null 2>&1; sleep 2
 r=$(as dana ask "hello while the model is down" --model claude-sonnet-4-5 -c INTERNAL); echo "$r" >> "$LOG"; check S29 'BACKEND_ERROR' "$r"
 docker compose -f stack/docker-compose.yml start "$SVC" >/dev/null 2>&1; sleep 3
+
+say "S32 content store: S1 stored; reading takes two people (security asks, the DPO approves); blocked S2 not stored; developers cannot ask; DPO erases (PD-50)"
+r=$(as ines content request "$EV1" --reason "suite: prove that S1 was stored"); echo "$r" >> "$LOG"; check S32a '"status": "open"' "$r"
+REQ=$(echo "$r" | grep -o '"request_id": "[^"]*"' | head -1 | cut -d'"' -f4)
+r=$(as ines content approve "$REQ"); echo "$r" >> "$LOG"; check S32b 'APPROVER_MUST_DIFFER' "$r"
+r=$(as ines content show "$EV1" --access "$REQ"); echo "$r" >> "$LOG"; check S32c 'ACCESS_NOT_APPROVED' "$r"
+r=$(as pawel content approve "$REQ"); echo "$r" >> "$LOG"; check S32d '"status": "approved"' "$r"
+r=$(as ines content show "$EV1" --access "$REQ"); echo "$r" >> "$LOG"; check S32e 'parses an ISO date' "$r"
+r=$(as ines events --limit 3 --type content_access); echo "$r" >> "$LOG"; check S32f '"content_access"' "$r"
+r=$(as ines content request "$EV2" --reason "suite: a blocked request must not be stored"); echo "$r" >> "$LOG"; check S32g 'NOT_STORED' "$r"
+r=$(as dana content request "$EV1" --reason "a developer trying to read stored prompts"); echo "$r" >> "$LOG"; check S32h 'FORBIDDEN' "$r"
+r=$(as pawel content erase --event "$EV1" --reason "suite: erasure request DSAR-TEST-001"); echo "$r" >> "$LOG"
+r=$(as ines content show "$EV1" --access "$REQ"); echo "$r" >> "$LOG"; check S32i '"prompt": null' "$r"
+
+say "S33 client asks a product question → answered from the feature catalog by the self-hosted model (PD-51)"
+r=$(as carla product-ask "Do we already block personal data in prompts?"); echo "$r" >> "$LOG"; check S33 '"X-AGL-Model": "code-local"' "$r"
+
+say "S34 client sends a free prompt to the model → block CLIENT_SCOPE (PD-51)"
+r=$(as carla ask "Write a function that parses an ISO date." -c INTERNAL); echo "$r" >> "$LOG"; check S34 'CLIENT_SCOPE' "$r"
+
+say "S35 client lists the feature catalog → answered by the gateway, no model involved"
+r=$(as carla features); echo "$r" >> "$LOG"; check S35 '"id": "dlp-personal-data"' "$r"
 
 echo -e "\n== $pass passed, $fail failed. Evidence in $EV" | tee -a "$LOG"
 RESULT=$([ $fail -eq 0 ] && echo pass || echo fail)
