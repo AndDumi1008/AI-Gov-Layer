@@ -1,0 +1,252 @@
+{
+ "S1": {
+  "proof": "Governed by default",
+  "title": "Every call authenticated, classified, metered and logged",
+  "annex": "A.5.14, A.8.15"
+ },
+ "S2a": {
+  "proof": "PR-3 EU only / privacy",
+  "title": "Someone else's personal data blocks the request; nothing is sent (PD-49)",
+  "annex": "A.5.34, A.8.12"
+ },
+ "S2b": {
+  "proof": "PR-3",
+  "title": "The model never received the blocked prompt (mock tier only)",
+  "annex": "A.8.12"
+ },
+ "S30a": {
+  "proof": "Privacy",
+  "title": "The caller's own registered address is allowed",
+  "annex": "A.5.34"
+ },
+ "S30b": {
+  "proof": "Privacy",
+  "title": "The exemption is recorded as a count (own_identity), never as a value",
+  "annex": "A.5.34, A.8.15"
+ },
+ "S31a": {
+  "proof": "Privacy",
+  "title": "Addresses on reserved test domains are allowed",
+  "annex": "A.5.34"
+ },
+ "S31b": {
+  "proof": "Privacy",
+  "title": "The exemption is recorded as a count (test_data)",
+  "annex": "A.5.34, A.8.15"
+ },
+ "S3": {
+  "proof": "Data leakage",
+  "title": "Credential pattern blocks the request; security notified",
+  "annex": "A.8.12, A.5.24"
+ },
+ "S4a": {
+  "proof": "PR-3 EU only",
+  "title": "CONFIDENTIAL with Claude Code's model name served by the self-hosted tier",
+  "annex": "A.5.12, A.5.23"
+ },
+ "S4b": {
+  "proof": "PR-3 EU only",
+  "title": "The response itself names agl/code-local",
+  "annex": "A.5.23"
+ },
+ "S5": {
+  "proof": "PR-3 EU only",
+  "title": "CONFIDENTIAL allowed on the self-hosted tier",
+  "annex": "A.5.12"
+ },
+ "S6": {
+  "proof": "PR-1 Quarantine",
+  "title": "RESTRICTED never reaches any model",
+  "annex": "A.5.12, A.8.3"
+ },
+ "S7": {
+  "proof": "Registry",
+  "title": "Only registered model aliases are routable",
+  "annex": "A.5.9, A.5.19"
+ },
+ "S8": {
+  "proof": "PR-2 Total budget",
+  "title": "Hard cap blocks when the envelope is used up",
+  "annex": "A.5.36"
+ },
+ "S9a": {
+  "proof": "PR-2 Total budget",
+  "title": "Top-up requires a second person",
+  "annex": "A.5.3, A.8.2"
+ },
+ "S9b": {
+  "proof": "PR-2 Total budget",
+  "title": "Self-approval refused",
+  "annex": "A.5.3"
+ },
+ "S10a": {
+  "proof": "PR-4 Immutable",
+  "title": "DBA cannot delete audit rows",
+  "annex": "A.5.33, A.8.15"
+ },
+ "S10b": {
+  "proof": "PR-4 Immutable",
+  "title": "DBA cannot update audit rows",
+  "annex": "A.5.33"
+ },
+ "S11": {
+  "proof": "PR-4 Immutable",
+  "title": "Object Lock refuses deletion of a stored segment",
+  "annex": "A.5.33, A.8.10"
+ },
+ "S12a": {
+  "proof": "PR-4 Immutable",
+  "title": "Hash chain and anchors verify",
+  "annex": "A.5.33, A.8.16"
+ },
+ "S12b": {
+  "proof": "PR-4 Immutable",
+  "title": "A single edited event is detected and all later links flagged",
+  "annex": "A.5.33"
+ },
+ "S13a": {
+  "proof": "Fail closed",
+  "title": "Governance down means no traffic",
+  "annex": "A.8.14"
+ },
+ "S13b": {
+  "proof": "Fail closed",
+  "title": "Service resumes when governance is back",
+  "annex": "A.8.14"
+ },
+ "S14": {
+  "proof": "PR-3 EU only",
+  "title": "Non-EU endpoint cannot be registered as approved",
+  "annex": "A.5.23, A.5.31"
+ },
+ "S19": {
+  "proof": "PR-1 Quarantine",
+  "title": "Quarantined repository: prompt blocked, open gate items listed",
+  "annex": "A.8.4, A.8.31"
+ },
+ "S20": {
+  "proof": "PR-1 Quarantine",
+  "title": "Quarantined repository: no AI sandbox",
+  "annex": "A.8.31"
+ },
+ "S21": {
+  "proof": "PR-1 Quarantine",
+  "title": "Production-derived data cannot be mounted",
+  "annex": "A.8.11, A.8.33"
+ },
+ "S22a": {
+  "proof": "PR-1 Quarantine",
+  "title": "Gate satisfied and dual sign-off opens the repository",
+  "annex": "A.5.3, A.8.4"
+ },
+ "S22b": {
+  "proof": "PR-1 Quarantine",
+  "title": "Prompt allowed after sign-off",
+  "annex": "A.8.4"
+ },
+ "S23a": {
+  "proof": "PR-1 Quarantine",
+  "title": "A failed gate item re-quarantines automatically",
+  "annex": "A.8.4, A.8.31"
+ },
+ "S23b": {
+  "proof": "PR-1 Quarantine",
+  "title": "Prompt blocked again",
+  "annex": "A.8.4"
+ },
+ "S25a": {
+  "proof": "PR-3 EU only",
+  "title": "Non-EU host unreachable at the network layer",
+  "annex": "A.8.20, A.8.22"
+ },
+ "S25b": {
+  "proof": "PR-3 EU only",
+  "title": "The formerly allowed US provider host is unreachable too",
+  "annex": "A.8.20, A.8.22"
+ },
+ "S27": {
+  "proof": "G6 Traceability",
+  "title": "Chain reconciled against GitHub's merge records: AI-Gov-Layer",
+  "annex": "A.5.33, A.8.15, A.8.32"
+ },
+ "S28": {
+  "proof": "PR-3 EU only",
+  "title": "A non-EU endpoint cannot be registered even as evaluating",
+  "annex": "A.5.23, A.5.31"
+ },
+ "S29": {
+  "proof": "PR-3 EU only",
+  "title": "Self-hosted model down: the request fails, nothing falls back to another model",
+  "annex": "A.5.23, A.8.14"
+ },
+ "S26": {
+  "proof": "Policy as code",
+  "title": "Policy bundle unit tests pass",
+  "annex": "A.8.9, A.8.25"
+ },
+ "S27b": {
+  "proof": "G6 Traceability",
+  "title": "Chain reconciled against GitHub's merge records: parcel-app",
+  "annex": "A.5.33, A.8.15, A.8.32"
+ },
+ "S32a": {
+  "proof": "Content store",
+  "title": "Security asks to read S1's stored prompt, with a reason",
+  "annex": "A.8.15, A.5.28"
+ },
+ "S32b": {
+  "proof": "Content store",
+  "title": "Approving your own read request is refused",
+  "annex": "A.5.3, A.8.2"
+ },
+ "S32c": {
+  "proof": "Content store",
+  "title": "Nothing is readable before a second person approves",
+  "annex": "A.5.15, A.8.3"
+ },
+ "S32d": {
+  "proof": "Content store",
+  "title": "The DPO approves as the second person",
+  "annex": "A.5.3"
+ },
+ "S32e": {
+  "proof": "Content store",
+  "title": "The approved requester reads the stored prompt and answer",
+  "annex": "A.8.15"
+ },
+ "S32f": {
+  "proof": "Content store",
+  "title": "The read is itself an audit event, naming both people and the reason",
+  "annex": "A.8.15, A.5.33"
+ },
+ "S32g": {
+  "proof": "Content store",
+  "title": "A blocked request is never stored",
+  "annex": "A.5.34, A.8.12"
+ },
+ "S32h": {
+  "proof": "Content store",
+  "title": "Developers cannot ask to read stored prompts",
+  "annex": "A.8.3, A.5.15"
+ },
+ "S32i": {
+  "proof": "Content store",
+  "title": "The DPO erases stored content; the audit chain is untouched",
+  "annex": "A.5.34, A.8.10"
+ },
+ "S33": {
+  "proof": "Client questions",
+  "title": "A client's product question is answered from the feature catalog by the self-hosted model",
+  "annex": "A.5.10, A.8.3"
+ },
+ "S34": {
+  "proof": "Client questions",
+  "title": "A client cannot send free prompts to a model",
+  "annex": "A.5.15, A.8.3"
+ },
+ "S35": {
+  "proof": "Client questions",
+  "title": "The feature catalog is listed by the gateway without a model",
+  "annex": "A.5.10"
+ }
+}

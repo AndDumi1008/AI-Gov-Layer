@@ -32,10 +32,11 @@ class Chain:
 
     def append(self, type_: str, body: dict, actor_identity_id=None, team_id=None, model_endpoint_id=None, outcome=None, reasons=None, cost_eur=None) -> dict:
         with self.lock:
-            from .runs import current_run   # run correlation id from the x-agl-run header, if any
+            from .runs import current_run, current_check   # correlation ids from x-agl-run / x-agl-check, if any
             run_id = body.get("run_id") or current_run.get()
+            check = body.get("check") or current_check.get()
             ev = {"event_id": str(uuid.uuid4()), "ts": dt.datetime.now(dt.timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
-                  "type": type_, "schema_version": 1, **({"run_id": run_id} if run_id else {}), **body, "prev_hash": self._last_hash()}
+                  "type": type_, "schema_version": 1, **({"run_id": run_id} if run_id else {}), **({"check": check} if check else {}), **body, "prev_hash": self._last_hash()}
             ev["hash"] = event_hash(ev)
             seg_id = self.open[0]["_segment_id"] if self.open else str(uuid.uuid4())
             db.run("""insert into audit_event (event_id, ts, type, actor_identity_id, team_id, model_endpoint_id, outcome, reasons, cost_eur, segment_id, prev_hash, hash, body)
@@ -173,10 +174,14 @@ class Chain:
                 anchor_results.append({"date": a["anchor_date"].isoformat(), "through": a["anchored_through"].isoformat(), "segments": None, "matches": False, "error": str(e)[:120]})
         uncovered = [s["object_uri"] for s in segs if s["object_uri"] not in covered]
         result = "pass" if not broken and not hot_mismatch and all(x["matches"] for x in anchor_results) else "fail"
+        # the verification itself is evidence: appended to the chain after computing, so it is not inside its own scope
+        self_ev = {"result": result, "events_verified": len(events), "segments": len(seg_results), "broken_links": len(broken), "hot_copy_mismatches": len(hot_mismatch),
+                   "anchors_matching": sum(1 for x in anchor_results if x["matches"]), "anchors": len(anchor_results), "segments_not_yet_anchored": len(uncovered), "simulated_tamper": bool(simulate_tamper)}
         db.run("insert into chain_verification (range_start, range_end, result, details) values (%s,%s,%s,%s)",
                (events[0]["ts"] if events else dt.datetime.now(dt.timezone.utc), events[-1]["ts"] if events else dt.datetime.now(dt.timezone.utc), result,
                 json.dumps({"events": len(events), "broken": broken[:10], "hot_mismatch": len(hot_mismatch), "anchors": anchor_results, "simulated_tamper": tampered_at})))
-        return {"result": result, "events_verified": len(events), "segments": seg_results, "broken_links": broken, "hot_copy_mismatches": len(hot_mismatch),
+        ver_ev = self.append("chain_verified", self_ev, outcome=result)
+        return {"result": result, "event_id": ver_ev["event_id"], "events_verified": len(events), "segments": seg_results, "broken_links": broken, "hot_copy_mismatches": len(hot_mismatch),
                 "anchors": anchor_results, "segments_not_yet_anchored": len(uncovered), "simulated_tamper_event": tampered_at, "head_hash": events[-1]["hash"] if events else None}
 
 chain: Chain | None = None

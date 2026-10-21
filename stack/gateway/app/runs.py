@@ -20,6 +20,7 @@ CONFIG_PATHS = {
 }
 
 current_run: ContextVar[str | None] = ContextVar("agl_run", default=None)
+current_check: ContextVar[str | None] = ContextVar("agl_check", default=None)   # x-agl-check: which canary/check produced the event
 
 def _sha256_path(path: str) -> tuple[str, int]:
     """Digest of a file, or of a directory as the sorted list of (relative name, file digest)."""

@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AGL Scoreboard</title>
+<style>
+:root{--bg:#f3f5f6;--surface:#fff;--fg:#17222c;--muted:#5b6b78;--line:#d6dde3;--accent:#0e6f7a;--accent-ink:#fff;--ok:#1f7a3f;--ok-bg:#e6f4ea;--warn:#b26a00;--warn-bg:#fff4e3;--bad:#b3261e;--bad-bg:#fde9e7;--mono:ui-monospace,Menlo,Consolas,monospace}
+@media (prefers-color-scheme:dark){:root{--bg:#101619;--surface:#182026;--fg:#e8edf0;--muted:#97a6b2;--line:#2b3740;--accent:#3fb3bf;--accent-ink:#071114;--ok:#5ccf84;--ok-bg:#15311f;--warn:#f2b34d;--warn-bg:#3a2a12;--bad:#ff7b72;--bad-bg:#3d1c19;color-scheme:dark}}
+*{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 -apple-system,"Segoe UI",Helvetica,Arial,sans-serif;padding:16px}
+.wrap{max-width:1180px;margin:0 auto;display:grid;gap:16px}
+header{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;border-bottom:2px solid var(--fg);padding-bottom:10px}
+h1{font-size:20px;margin:0;text-transform:uppercase;letter-spacing:.02em} h2{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 8px}
+.who{margin-left:auto;display:flex;gap:8px;align-items:center;font-size:13px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:14px}
+.kpi{display:flex;gap:14px;flex-wrap:wrap} .kpi div{border:1px solid var(--line);border-radius:4px;padding:8px 14px;min-width:110px} .kpi b{display:block;font-size:22px}
+table{border-collapse:collapse;width:100%;font-size:13px} th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top} th{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.mono{font-family:var(--mono);font-size:11.5px;word-break:break-all}
+.ok{color:var(--ok);font-weight:600} .bad{color:var(--bad);font-weight:600} .warn{color:var(--warn);font-weight:600} .muted{color:var(--muted)}
+a.ev{font-family:var(--mono);font-size:11px;color:var(--accent);cursor:pointer;text-decoration:underline} .evs{display:flex;flex-wrap:wrap;gap:6px}
+pre{font-family:var(--mono);font-size:11.5px;background:var(--bg);padding:8px;border-radius:3px;overflow:auto;max-height:360px;margin:6px 0 0}
+select,button,input{font:13px inherit;padding:6px 10px;border:1px solid var(--line);border-radius:3px;background:var(--bg);color:var(--fg)} button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);cursor:pointer}
+.tscroll{overflow-x:auto}
+</style>
+</head>
+<body><div class="wrap">
+<header><h1>AGL Scoreboard</h1><span class="muted" style="font-size:13px">rendered only from the audit chain; every figure links to its record</span>
+ <div class="who" id="who"><form id="login"><select id="user"></select> <button class="primary" type="submit">Connect</button></form></div></header>
+<div class="card" id="pick"><h2>Run</h2><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><select id="runs"></select><button id="load" class="primary">Show</button><span class="muted" id="hint"></span></div></div>
+<div id="board" hidden>
+ <div class="card"><h2>Verdict</h2><div class="kpi" id="kpi"></div><p class="muted" id="meta" style="margin:8px 0 0;font-size:13px"></p></div>
+ <div class="card"><h2>Guardrails and canaries</h2><div class="tscroll"><table id="checks"><thead><tr><th>Check</th><th>What it demonstrates</th><th>Proof</th><th>Annex A</th><th>Result</th><th>Evidence (click to open the record)</th></tr></thead><tbody></tbody></table></div></div>
+ <div class="card"><h2>Chain verification and reconciliation</h2><div class="tscroll"><table id="integrity"><thead><tr><th>Kind</th><th>Result</th><th>Figures</th><th>Record</th></tr></thead><tbody></tbody></table></div></div>
+ <div class="card"><h2>Configuration in force</h2><div class="tscroll"><table id="cfg"><thead><tr><th>Item</th><th>Digest</th><th>Files</th></tr></thead><tbody></tbody></table></div><p id="drift" style="margin:8px 0 0;font-size:13px"></p></div>
+ <div class="card" id="rec" hidden><h2>Record</h2><div class="mono" id="recid"></div><pre id="recbody"></pre></div>
+</div>
+</div>
+<script>
+(() => {
+const $=id=>document.getElementById(id); let token=null, MAP={};
+try{token=localStorage.getItem('agl_token')}catch{}
+const api=(p,o={})=>fetch(p,{...o,headers:{'content-type':'application/json',...(token?{'authorization':'Bearer '+token}:{}),...(o.headers||{})}});
+const esc=t=>String(t??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const cls=r=>r==='pass'?'ok':r==='fail'?'bad':'warn';
+async function users(){ try{const j=await (await api('/agl/dev/users')).json(); $('user').innerHTML=j.users.map(u=>`<option value="${u.subject}">${esc(u.display_name)} (${u.subject})</option>`).join('');}catch{} }
+$('login').addEventListener('submit',async e=>{e.preventDefault(); const r=await api('/agl/dev/mint',{method:'POST',body:JSON.stringify({user:$('user').value})}); if(!r.ok)return; token=(await r.json()).token; try{localStorage.setItem('agl_token',token)}catch{}; boot();});
+async function boot(){
+  const w=await api('/agl/whoami'); if(!w.ok){ $('hint').textContent='connect to read the chain'; return; }
+  const me=await w.json(); $('who').innerHTML=`<span>Connected as <b>${esc(me.display_name||me.subject)}</b></span>`;
+  MAP=await (await api('/agl/checks')).json();
+  const rs=await (await api('/agl/runs')).json(); $('runs').innerHTML=rs.runs.map(r=>`<option value="${r.run_id}">${r.run_id} · ${esc(r.label||'')} · ${String(r.ts).slice(0,19).replace('T',' ')}</option>`).join('');
+  const fromPath=location.pathname.split('/scoreboard/')[1]; if(fromPath){ $('runs').value=fromPath; } show();
+}
+$('load').onclick=show;
+async function show(){
+  const run=$('runs').value; if(!run)return; const r=await api('/agl/scoreboard/'+run); if(!r.ok){ $('hint').textContent='no such run'; return; }
+  const b=await r.json(); $('board').hidden=false; history.replaceState(null,'','/scoreboard/'+run);
+  const f=b.finished||{};
+  $('kpi').innerHTML=`<div><b class="${cls(f.result)}">${esc(f.result||'open')}</b>run result</div><div><b class="ok">${f.passed??'–'}</b>passed</div><div><b class="${f.failed?'bad':'ok'}">${f.failed??'–'}</b>failed</div><div><b>${b.rendered_from_events}</b>chain events</div><div><b>${b.unattributed_events}</b>events outside any check</div>`;
+  $('meta').innerHTML=`Run <span class="mono">${esc(run)}</span> · ${esc(b.snapshot.label||'')} · events #${b.first_seq}–#${b.last_seq} · snapshot ${evlink(b.snapshot.event_id)} · finish ${f.event_id?evlink(f.event_id):'<span class="muted">not finished</span>'}`;
+  $('checks').querySelector('tbody').innerHTML=b.checks.map(c=>{const m=MAP[c.id]||{}; return `<tr><td class="mono">${esc(c.id)}</td><td>${esc(m.title||'')}</td><td>${esc(m.proof||'')}</td><td class="mono">${esc(m.annex||'')}</td><td class="${cls(c.result)}">${esc(c.result)}</td><td class="evs">${c.events.map(e=>evlink(e.event_id,`${e.type}${e.outcome?' · '+e.outcome:''}`)).join('')||'<span class="muted">no gateway event (checked outside the gateway: database, object store, policy test)</span>'}</td></tr>`}).join('');
+  const integ=[...b.chain_verifications.map(v=>`<tr><td>chain verification${v.simulated_tamper?' (simulated tamper)':''}</td><td class="${cls(v.result)}">${esc(v.result)}</td><td>${v.events_verified} events re-hashed · ${v.segments} WORM segments · ${v.broken_links} broken links · ${v.hot_copy_mismatches} hot-copy mismatches · anchors ${v.anchors_matching}/${v.anchors}</td><td>${evlink(v.event_id)}</td></tr>`),
+    ...b.reconciliations.map(x=>`<tr><td>reconciliation · ${esc(x.repo)}</td><td class="${cls(x.result)}">${esc(x.result)}</td><td>imported ${x.imported} · matched ${x.matched} · mismatches ${(x.mismatches||[]).length} · gates red ${(x.gates_not_green||[]).length} · not reported (historical) ${(x.gates_not_reported||[]).length} · self-merged ${x.self_merged}</td><td>${evlink(x.event_id)}</td></tr>`)];
+  $('integrity').querySelector('tbody').innerHTML=integ.join('')||'<tr><td colspan=4 class="muted">none in this run</td></tr>';
+  const d=b.snapshot.digests||{}, im=b.snapshot.images||{};
+  $('cfg').querySelector('tbody').innerHTML=Object.entries(d).map(([k,v])=>`<tr><td>${esc(k)}</td><td class="mono">${esc(v.digest||'missing')}</td><td>${v.files??''}</td></tr>`).join('')+Object.entries(im).map(([k,v])=>`<tr><td>image ${esc(k)}</td><td class="mono">${esc(v)}</td><td></td></tr>`).join('');
+  const dr=b.snapshot.drift||[]; $('drift').innerHTML=!b.snapshot.previous?'<span class="muted">first snapshot, nothing to compare</span>':dr.length?`<span class="bad">drift since the previous snapshot:</span> ${dr.map(x=>`<span class="mono">${esc(x.item)}</span>`).join(', ')}`:'<span class="ok">no drift from the previous snapshot</span>';
+}
+function evlink(id,label){ return id?`<a class="ev" data-ev="${id}">${esc(label||id.slice(0,8)+'…')}</a>`:''; }
+document.addEventListener('click',async e=>{const a=e.target.closest('a[data-ev]'); if(!a)return; const r=await api('/agl/events/'+a.dataset.ev); const j=await r.json(); $('rec').hidden=false; $('recid').textContent=a.dataset.ev; $('recbody').textContent=JSON.stringify(j.event||j,null,2); $('rec').scrollIntoView({block:'start'});});
+users().then(boot);
+})();
+</script>
+</body></html>

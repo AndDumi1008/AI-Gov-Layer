@@ -16,12 +16,15 @@ pass=0; fail=0
 BIND_IP=$(grep -E '^BIND_IP=' "$ENV_FILE" | cut -d= -f2); BIND_IP=${BIND_IP:-127.0.0.1}
 PSQL="docker compose -f stack/docker-compose.yml exec -T postgres psql -U postgres"
 
-say(){ echo -e "\n== $*" | tee -a "$LOG"; }
+say(){ echo -e "\n== $*" | tee -a "$LOG"; export AGL_CHECK=$(echo "$1" | grep -oE "^S[0-9]+[ab]?" ); }
+RESULTS="[]"
 check(){ # check <name> <expected-substring> <actual>
-  if echo "$3" | grep -qi -- "$2"; then echo "   PASS $1" | tee -a "$LOG"; pass=$((pass+1)); else echo "   FAIL $1 (expected '$2')" | tee -a "$LOG"; echo "$3" | head -20 | tee -a "$LOG"; fail=$((fail+1)); fi
+  if echo "$3" | grep -qi -- "$2"; then echo "   PASS $1" | tee -a "$LOG"; pass=$((pass+1)); res=pass; else echo "   FAIL $1 (expected '$2')" | tee -a "$LOG"; echo "$3" | head -20 | tee -a "$LOG"; fail=$((fail+1)); res=fail; fi
+  RESULTS=$(python3 -c "import json,sys;r=json.loads(sys.argv[1]);r.append({'id':sys.argv[2],'result':sys.argv[3],'expect':sys.argv[4][:80]});print(json.dumps(r))" "$RESULTS" "$1" "$res" "$2")
 }
 check_absent(){ # check_absent <name> <forbidden-substring> <actual>
-  if echo "$3" | grep -qi -- "$2"; then echo "   FAIL $1 (found '$2')" | tee -a "$LOG"; fail=$((fail+1)); else echo "   PASS $1" | tee -a "$LOG"; pass=$((pass+1)); fi
+  if echo "$3" | grep -qi -- "$2"; then echo "   FAIL $1 (found '$2')" | tee -a "$LOG"; fail=$((fail+1)); res=fail; else echo "   PASS $1" | tee -a "$LOG"; pass=$((pass+1)); res=pass; fi
+  RESULTS=$(python3 -c "import json,sys;r=json.loads(sys.argv[1]);r.append({'id':sys.argv[2],'result':sys.argv[3],'expect':'absent: '+sys.argv[4][:72]});print(json.dumps(r))" "$RESULTS" "$1" "$res" "$2")
 }
 evid(){ echo "$1" | grep -o '"X-AGL-Event": "[^"]*"' | head -1 | cut -d'"' -f4; }
 as(){ # as <user> <cmd...>  → run CLI as user (separate token files)
@@ -139,6 +142,10 @@ try:
 except Exception as e: print('REFUSED',type(e).__name__,str(e)[:120])" 2>&1); echo "$r" >> "$LOG"; check "S25${h%%:*}" 'REFUSED\|HTTP 403' "$r"
 done
 
+say "S27 reconcile the chain against GitHub's own records (merges, gates, approvals, post-merge runs) — G6"
+r=$(as ines reconcile AndDumi1008/AI-Gov-Layer AndDumi1008/parcel-app 2>&1); echo "$r" >> "$LOG"; check S27 'AI-Gov-Layer: pass' "$r"; check S27b 'parcel-app: pass' "$r"
+echo "$r" > "$EV/reconcile.txt"
+
 say "S26 policy replay: 1000 synthetic decisions, count any non-EU route"
 # static policy test on the engine in use; the bind mount must be a path on THAT host (SERVER run: AGL_POLICY_PATH=D:/Projects/AI-Gov-Layer/stack/policy)
 r=$(docker run --rm -v "${AGL_POLICY_PATH:-$PWD/stack/policy}:/policy:ro" openpolicyagent/opa:1.4.2-static test /policy 2>&1 | tail -1); echo "$r" >> "$LOG"; check S26 'PASS' "$r"
@@ -173,7 +180,9 @@ r=$(as carla features); echo "$r" >> "$LOG"; check S35 '"id": "dlp-personal-data
 
 echo -e "\n== $pass passed, $fail failed. Evidence in $EV" | tee -a "$LOG"
 RESULT=$([ $fail -eq 0 ] && echo pass || echo fail)
-AGL_TOKEN_FILE="$EV/.tok-ines" $AGL run finish "$AGL_RUN" --result "$RESULT" --checks "{\"passed\":$pass,\"failed\":$fail}" > "$EV/run-finished.json" 2>/dev/null
+unset AGL_CHECK
+CHECKS_JSON=$(python3 -c 'import json,sys;print(json.dumps({"passed":int(sys.argv[1]),"failed":int(sys.argv[2]),"results":json.loads(sys.argv[3])}))' "$pass" "$fail" "$RESULTS")
+AGL_TOKEN_FILE="$EV/.tok-ines" $AGL run finish "$AGL_RUN" --result "$RESULT" --checks "$CHECKS_JSON" > "$EV/run-finished.json" 2>/dev/null
 AGL_TOKEN_FILE="$EV/.tok-ines" $AGL run show "$AGL_RUN" > "$EV/run.json" 2>/dev/null
 as ines events --limit 5 > "$EV/last-events.json" 2>/dev/null; as ines audit verify > "$EV/chain-verification.json" 2>/dev/null
 [ $fail -eq 0 ]
