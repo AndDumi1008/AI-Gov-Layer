@@ -4,7 +4,9 @@ name: ci
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    # edited: ticking the AI checklist or adding the Ticket line re-runs ai-label and ticket (#17). Every job runs
+    # on an edit, none is skipped: a skipped required check counts as passed and would hide a failure on this commit.
+    types: [opened, synchronize, reopened, ready_for_review, edited]
   merge_group:
   push:
     branches: [main]
