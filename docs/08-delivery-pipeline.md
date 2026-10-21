@@ -129,7 +129,7 @@ What the laptop does **not** give you is a delegated agent identity or a step ca
 
 ## 5.1 Gate 1 live on this repository (2026-10-20)
 
-This repository runs its own Gate 1 on GitHub-hosted runners: `.github/workflows/ci.yml` with `env-vars`, `secrets` (gitleaks over history), `policy-test` (OPA), `gateway-test` (pytest), `schema` (migrations and seed loaded into PostgreSQL 16, then the append-only, non-EU and quarantine constraints are provoked and must refuse), `workflows-lint` (actionlint over this and the example workflows) and `ai-label`. The ruleset `main — governed merge path` requires all seven through a pull request, with strict status checks, no force pushes and no bypass actors.
+This repository runs its own Gate 1 on GitHub-hosted runners: `.github/workflows/ci.yml` with `env-vars`, `secrets` (gitleaks over history), `policy-test` (OPA), `gateway-test` (pytest), `schema` (migrations and seed loaded into PostgreSQL 16, then the append-only, non-EU and quarantine constraints are provoked and must refuse), `workflows-lint` (actionlint over this and the example workflows), and `ai-label` and `ticket` in `.github/workflows/pr-meta.yml`, which also runs when the PR description is edited so ticking the checklist re-checks it without re-running the rest (#17). The ruleset `main — governed merge path` requires all seven through a pull request, with strict status checks, no force pushes and no bypass actors.
 
 Pull request 1 was the first change through it: all checks passed on the merge commit, the `ai-assisted` label was applied from the `Co-Authored-By` trailer, and the author's checklist was verified before merge. A human merged it.
 

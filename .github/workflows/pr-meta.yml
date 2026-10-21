@@ -1,0 +1,61 @@
+# Gate 1, PR metadata checks (#17). ai-label and ticket read only the PR's title, description and commits, so
+# they live apart from ci.yml and also run when the description is edited (ticking the checklist, adding the
+# Ticket line). ci.yml does not run on an edit at all: its results on the commit stand, neither re-run nor
+# overwritten by skipped runs, which a required check would count as passed.
+name: pr-meta
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+  merge_group:            # both jobs skip there, as they did in ci.yml, so the required names still report
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-meta-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ai-label:
+    name: ai-label
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      pull-requests: write          # only this job; it runs no code from the PR
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # ratchet:actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Detect AI-Assisted / Co-Authored-By trailer, label, require the checklist
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if git log --format=%B "$BASE..$HEAD" | grep -Eiq '^(AI-Assisted|Co-Authored-By):.*(claude|copilot|codex|cursor|gemini)'; then
+            gh pr edit "$PR" --add-label ai-assisted
+            if gh pr view "$PR" --json body -q .body | grep -q '\- \[ \]'; then
+              echo "::error::AI-assisted checklist has unticked items (edit the PR description)"; exit 1
+            fi
+            echo "ai-assisted: labelled, checklist complete"
+          else
+            echo "no AI trailer found"
+          fi
+
+  ticket:
+    name: ticket
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Every change is traceable to a ticket (owner's working rule; docs/11 gap 12)
+        env:
+          BODY: ${{ github.event.pull_request.body }}
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          if printf '%s\n%s' "$TITLE" "$BODY" | grep -Eq '(^|[^A-Za-z0-9_/])(#[0-9]+|[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+)([^0-9]|$)'; then
+            echo "ticket reference found"
+          else
+            echo "::error::No ticket reference. Add 'Ticket: #<issue>' (or owner/repo#<issue>) to the PR description."; exit 1
+          fi
