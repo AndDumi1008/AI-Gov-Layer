@@ -151,18 +151,33 @@ class Chain:
         hot = db.all_("select event_id, hash from audit_event order by seq")
         hot_map = {r["event_id"] if isinstance(r["event_id"], str) else str(r["event_id"]): r["hash"] for r in hot}
         hot_mismatch = [e["event_id"] for e in events if hot_map.get(e["event_id"]) != e["hash"]]
-        anchors = db.all_("select anchor_date, anchored_through, root_hash from audit_anchor order by anchored_through")
+        # An anchor is a statement about a specific list of segments (the document in the anchor store names them).
+        # Verify against that list, not against a time window: a segment recovered later (PD-47) must not
+        # invalidate an anchor that never covered it; it is simply uncovered until the next anchor.
+        anchors = db.all_("select anchor_date, anchored_through, root_hash, external_uri from audit_anchor order by anchored_through")
         anchor_results = []
+        db_last = {str(s["id"]): s["last_hash"] for s in segs}
+        uri_last = {s["object_uri"]: s["last_hash"] for s in segs}
+        covered = set()
         for a in anchors:
-            day_segs = db.all_("select last_hash from audit_segment where closed_at::date=%s and closed_at <= %s order by closed_at", (a["anchor_date"], a["anchored_through"]))
-            root = sha256("".join(s["last_hash"] for s in day_segs))
-            anchor_results.append({"date": a["anchor_date"].isoformat(), "through": a["anchored_through"].isoformat(), "segments": len(day_segs), "matches": root == a["root_hash"]})
+            try:
+                key = a["external_uri"].split(f"s3://{config.ANCHOR_BUCKET}/", 1)[1]
+                doc = json.loads(self.anchor_s3.get_object(Bucket=config.ANCHOR_BUCKET, Key=key)["Body"].read().decode())
+                listed = doc.get("segments", [])
+                root = sha256("".join(s["last_hash"] for s in listed)) if listed else sha256("")
+                present = all(uri_last.get(s["uri"]) == s["last_hash"] for s in listed)
+                covered.update(s["uri"] for s in listed)
+                anchor_results.append({"date": a["anchor_date"].isoformat(), "through": a["anchored_through"].isoformat(), "segments": len(listed),
+                                       "matches": root == a["root_hash"] == doc.get("root_hash") and present, "listed_segments_intact": present})
+            except Exception as e:  # anchor document unreadable: that is a failure in itself
+                anchor_results.append({"date": a["anchor_date"].isoformat(), "through": a["anchored_through"].isoformat(), "segments": None, "matches": False, "error": str(e)[:120]})
+        uncovered = [s["object_uri"] for s in segs if s["object_uri"] not in covered]
         result = "pass" if not broken and not hot_mismatch and all(x["matches"] for x in anchor_results) else "fail"
         db.run("insert into chain_verification (range_start, range_end, result, details) values (%s,%s,%s,%s)",
                (events[0]["ts"] if events else dt.datetime.now(dt.timezone.utc), events[-1]["ts"] if events else dt.datetime.now(dt.timezone.utc), result,
                 json.dumps({"events": len(events), "broken": broken[:10], "hot_mismatch": len(hot_mismatch), "anchors": anchor_results, "simulated_tamper": tampered_at})))
         return {"result": result, "events_verified": len(events), "segments": seg_results, "broken_links": broken, "hot_copy_mismatches": len(hot_mismatch),
-                "anchors": anchor_results, "simulated_tamper_event": tampered_at, "head_hash": events[-1]["hash"] if events else None}
+                "anchors": anchor_results, "segments_not_yet_anchored": len(uncovered), "simulated_tamper_event": tampered_at, "head_hash": events[-1]["hash"] if events else None}
 
 chain: Chain | None = None
 
