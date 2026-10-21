@@ -20,6 +20,20 @@ preview-api.{$DOMAIN} {
     tls internal
     reverse_proxy parcel-preview-api-1:3000
 }
+# parcel-app frontends (docs/07 §10.6, PD-44/PD-45): the static web container of each environment, on the same
+# stack network. An environment whose stack is not up answers 502.
+preview.parcel.{$DOMAIN} {
+    tls internal
+    reverse_proxy parcel-preview-web-1:80
+}
+staging.parcel.{$DOMAIN} {
+    tls internal
+    reverse_proxy parcel-staging-web-1:80
+}
+parcel.{$DOMAIN} {
+    tls internal
+    reverse_proxy parcel-production-web-1:80
+}
 opa.{$DOMAIN} {
     tls internal
     reverse_proxy opa:8181

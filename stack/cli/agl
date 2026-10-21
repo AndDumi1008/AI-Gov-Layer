@@ -110,7 +110,7 @@ def main():
         if st >= 400 or args.no_docker: out(st, b)
         print(f"sandbox {b['sandbox_id']} for {b['repository']} (dataset: {b['dataset']}) — delegated token expires {b['expires_at']}")
         docker = os.environ.get("DOCKER", "docker")
-        cmd = [docker, "run", "--rm", "-i" if args.run else "-it", "--name", b["sandbox_id"], "--network", "agl_agl-net", "--read-only", "--tmpfs", "/tmp", "--tmpfs", "/workspace:uid=10001",
+        cmd = [docker, "run", "--rm", "-i" if args.run else "-it", "--name", b["sandbox_id"], "--network", "agl_sandbox-net", "--read-only", "--tmpfs", "/tmp", "--tmpfs", "/workspace:uid=10001",
                "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--pids-limit", "256", "--memory", "2g",
                "-e", f"AGL_TOKEN={b['token']}", "-e", f"AGL_SANDBOX={b['sandbox_id']}", "agl-sandbox:latest"]
         if args.run: cmd.append(args.run)

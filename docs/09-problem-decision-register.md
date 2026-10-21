@@ -72,7 +72,9 @@ IDs are `PD-xx`, chronological.
 | PD-41 | No cloud account or spend in the PoC: an EU-region external model endpoint is out of scope; US-endpoint exception decision deferred (issue #19) | decided | 2026-10-21 |
 | PD-42 | GitHub Issues is the ticket system; every PR must reference an issue, enforced by the `ticket` check | applied | 2026-10-21 |
 | PD-43 | EU only, no exception: the US endpoint is revoked, all model work runs on the self-hosted tier (issue #19) | decided; applied in repo, not on SERVER | 2026-10-21 |
+| PD-45 | Sandboxes shared the governance network: could reach Postgres, MinIO, OPA and the egress proxy; now on a dedicated internal network with the gateway only (issue #26) | verified | 2026-10-21 |
 | PD-44 | Vercel removed: the parcel frontend runs only on SERVER, a static export in one web container per environment (issue #22) | applied | 2026-10-21 |
+| PD-45 | Parcel frontend hosting: read-only web container plus an SSH forced-command deploy account per environment; Caddy routes (issue #25) | applied | 2026-10-21 |
 
 ---
 
@@ -483,6 +485,17 @@ IDs are `PD-xx`, chronological.
 **Decision (owner, 2026-10-21).** (a). Each web container serves its environment's web volume read-only (`current/` → `releases/<digest>/`, plus `config.json`). Write access is the environment secret `WEB_DEPLOY_KEY`, an SSH key whose forced command runs only `web-deploy` and `web-rollback` for that environment, so the frontend has the same two factors as the database URLs: an environment secret and a runner that can route there. The Vercel frontend of PD-19 and the dormant variant of PD-21 are superseded; those entries stay as history.
 **Pros.** No hosting account outside SERVER and no deploy token held by a third party; a rollback is a pointer switch to a digest that was already verified. **Cons.** One preview at a time, as the preview backend already was; concurrent PRs overwrite each other's preview and are serialised by hand. The prebuilt artifact still passes through GitHub Actions artifact storage, like the source code (PD-16, PD-18). The web containers, their Caddy routes, the `WEB_DEPLOY_KEY` endpoint and the `web-build` / `web-deploy` / `web-rollback` targets do not exist yet; they come with the frontend in `parcel-app`.
 **Applied in.** `pipeline/.github/workflows/merge-candidate-paas.yml` and `release-paas.yml` (Vercel CLI and `VERCEL_*` secrets and variables replaced by `make web-build`, `web-deploy`, `web-rollback` with `WEB_DEPLOY_KEY`; the rollback audit event now carries the digest); `pipeline/README.md`; PoC §10.3 Tier 2 table, §10.6, §10.7; `.gitignore` here and in `parcel-app` (`.vercel/` removed). actionlint passes.
+**Status.** applied.
+
+## PD-45 — Parcel frontend hosting: an SSH forced command is the only writer
+
+**Problem.** PD-44 named `make web-deploy`, `make web-rollback` and the secret `WEB_DEPLOY_KEY`, but nothing implemented them. Issue #25; the owner asked for the containers, the deploy service, the make targets and the Caddy routes, tested with a placeholder page, nothing on SERVER.
+**Fixes considered.** (a) Mount each environment's web volume into the runner containers. (b) An HTTP upload endpoint with a bearer token. (c) A `web-deploy` container per environment: sshd with one ed25519 key and a forced command that can only deploy, roll back or report, on the stack network.
+**Thought process.** (a) gives every job on the `server` runner, PR code included, write access to staging without any secret, losing the environment scoping PD-11 and PD-12 rely on. (b) is custom code in the most sensitive path. (c) is standard tooling, keeps the key an environment secret, and the network still lets only `server-release` reach production.
+**Decision.** (c). Before extracting, the forced command checks the received artifact against the digest and refuses links, absolute or `../` member paths, and artifacts without `index.html`. It unpacks into `releases/<hex>/`, writes `config.json` (an https backend URL only) and switches `current` with one rename; `previous` keeps the last release for rollback. One lock serialises deploys. The client pins the host key under the alias `web-deploy-<env>` and refuses an environment with no pinned key. The web container is Caddy on a read-only root filesystem with the volume mounted read-only.
+**Found on the way.** The AGL managed settings on the owner's Mac (`deploy/server/managed-settings.json`) deny `docker` and `curl` to Claude Code, so the session that wrote the container test could not run it, and did not route around the rule. The test runs as the `web-test` job in parcel-app CI and as `make web-test` for a human. Busybox `mv` and `tar` differ from GNU on replacing a symlink and on stripping member names, so the deploy image installs GNU coreutils, tar and findutils.
+**Pros.** Each key opens one environment and can do three things; nothing is published on a port; the refusals are tested, not assumed. **Cons.** A key per environment for the owner to create and rotate; the image is built from Alpine 3.20 packages pulled at build time; rollback toggles between the last two releases only.
+**Applied in.** `parcel-app` (`deploy/web/`, compose services `web` and `web-deploy`, `scripts/web-remote.sh`, make targets, `tests/web_test.sh`, CI job `web-test`); this repository: Caddy routes `preview.parcel`, `staging.parcel` and `parcel.<domain>` (`caddy validate` passes), PoC §10.6.
 **Status.** applied.
 
 ---
