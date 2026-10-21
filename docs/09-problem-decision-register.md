@@ -546,6 +546,16 @@ gateway:8000 REACHABLE · everything else blocked (name resolution fails: the se
 **Amended 2026-10-21 (#7).** The SERVER run of 16:47 UTC failed reconciliation on one `changed` record, for PR #35. It had been imported while its post-merge run was still in progress (gh reports conclusion `""`), and GitHub later reported the run finished. Such a record is now a **completion**, not a mismatch. It holds only when `post_merge_run` is the only field that differs, the stored run had no conclusion or was not listed yet, and GitHub reports the same run id finished. The finished record is re-imported with `supersedes`, and `reconcile_result` counts it as `completed`. A final conclusion that changes (a re-run after a failure), a different run, or any other field that changes at the same time is still a mismatch. Tests: `stack/gateway/tests/test_scm.py` (five new cases, written first and observed failing).
 **Status.** verified.
 
+## PD-51 — One encrypted connection bundle and a cold start
+
+**Problem.** Gap 7 (docs/11; issue #12): connecting a developer took three artefacts and two sudo steps, and nothing proved a second machine could reproduce the result from the bundle alone.
+**Decision.** `agl bundle make --for <user>` asks the gateway for a one-time enrolment code (the gateway keeps only its SHA-256, 72 h, single use; issue, use and refusal are chain events), embeds the gateway URL, the CA certificate and the `agl` script, and encrypts the file with AES-256-CBC/PBKDF2 (600k iterations) under a passphrase, with `openssl`, so no new dependency. `agl enroll <bundle>` opens it with the passphrase, writes CA, config, CLI copy and token under `~/.agl`, exchanges the code for a token, and prints the Claude Code settings line. `agl run all` is the one-command start: open a run (digests, drift), fire every canary, verify the chain, close the run, print the scoreboard URL; exit code follows the result.
+**Cold start (2026-10-21).** A clean environment (`env -i`, empty HOME) holding only `dana.agl` and the script: enrol → `~/.agl` gains `agl ca.crt config.json token` → `run all` → 8/8 canaries, chain verified, scoreboard URL. A second `enroll` with the same bundle: `ENROLMENT_REFUSED`, logged. Honest limits: the "second machine" was a clean user environment on the same Mac, already on the tailnet and already trusting nothing (the CA travels in the bundle, so no keychain step is needed for the CLI; Claude Code still needs the managed settings installed with sudo); the bundle is two files until a self-extracting form exists, since enrolling needs the script before the bundle is open.
+**Found on the way.** The chain verification endpoint was restricted to security roles, so a developer's one-command start could not verify; it is read-only and now open to any enrolled identity.
+**Pros.** From bundle and passphrase to a reproducible scoreboard in two commands, with every step in the chain. **Cons.** Passphrase hand-over is out of band by design; the dev issuer still stands in for the IdP, so the token is an 8-hour PoC token.
+**Applied in.** `stack/schema/030_enrolment.sql`, gateway enrolment endpoints, `stack/cli/agl` (PR #41).
+**Status.** verified.
+
 ## Template for new entries
 
 ```
