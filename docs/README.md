@@ -30,7 +30,7 @@ Every AI call goes through one EU-hosted gateway that knows the caller (SSO), th
 
 ## Contributing under Gate 1
 
-Changes reach `main` only through a pull request that passes the seven checks in `.github/workflows/ci.yml`; AI-assisted commits carry a `Co-Authored-By`/`AI-Assisted` trailer, get the `ai-assisted` label automatically and need the checklist in the PR template ticked. See docs/08 §5.1.
+Changes reach `main` only through a pull request that passes the checks in `.github/workflows/ci.yml` and `pr-meta.yml` (the latter, `ai-label` and `ticket`, also re-runs when the PR description is edited); AI-assisted commits carry a `Co-Authored-By`/`AI-Assisted` trailer, get the `ai-assisted` label automatically and need the checklist in the PR template ticked. See docs/08 §5.1.
 
 ## Run the PoC (Tier 1)
 
