@@ -4,7 +4,8 @@ from app import scm
 
 def rec(mc, **kw):
     base = {"merge_commit": mc, "head_sha": "h" + mc, "author": "a", "merged_by": "b", "merged_at": "t", "base_ref": "main",
-            "required_checks": {"ci": "success"}, "gates_green": True, "gates_red": [], "gates_not_reported": [], "approvals": ["b"], "labels": [], "post_merge_run": {"id": 1, "conclusion": "success", "name": "ci"}, "pr": 1}
+            "required_checks": {"ci": "success"}, "gates_green": True, "gates_red": [], "gates_not_reported": [], "approvals": ["b"], "labels": [], "post_merge_run": {"id": 1, "conclusion": "success", "name": "ci"}, "pr": 1,
+            "record_version": scm.RECORD_VERSION}
     base.update(kw); return base
 
 def test_import_match_change_missing():
@@ -25,6 +26,6 @@ def test_gates_and_self_merge_flags():
     assert [s["merge_commit"] for s in r["self_merged"]] == ["y"]
 
 def test_old_record_version_is_reimported_not_mismatched():
-    old = rec("m1"); old.pop("gates_red"); old.pop("gates_not_reported")   # stored by the v1 collector, no record_version
+    old = rec("m1"); old.pop("gates_red"); old.pop("gates_not_reported"); old.pop("record_version")   # stored by the v1 collector
     r = scm.compare({"m1": old}, [rec("m1")])
     assert r["upgrades"] == ["m1"] and [x["merge_commit"] for x in r["imports"]] == ["m1"] and r["mismatches"] == []
