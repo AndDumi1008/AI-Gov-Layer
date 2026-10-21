@@ -36,8 +36,8 @@ MAP = {  # scenario → (proof, control it demonstrates, ISO 27001:2022 Annex A)
  "S28": ("PR-3 EU only", "A non-EU endpoint cannot be registered even as evaluating", "A.5.23, A.5.31"),
  "S29": ("PR-3 EU only", "Self-hosted model down: the request fails, nothing falls back to another model", "A.5.23, A.8.14"),
  "S26": ("Policy as code", "Policy bundle unit tests pass", "A.8.9, A.8.25"),
- "S27": ("G6 Traceability", "Chain reconciled against GitHub's merge records: AI-Gov-Layer", "A.5.33, A.8.15, A.8.32"),
- "S27b":("G6 Traceability", "Chain reconciled against GitHub's merge records: parcel-app", "A.5.33, A.8.15, A.8.32"),
+ "S36": ("G6 Traceability", "Chain reconciled against GitHub's merge records: AI-Gov-Layer", "A.5.33, A.8.15, A.8.32"),
+ "S36b":("G6 Traceability", "Chain reconciled against GitHub's merge records: parcel-app", "A.5.33, A.8.15, A.8.32"),
 }
 
 def parse(log: str):
