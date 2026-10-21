@@ -74,6 +74,7 @@ IDs are `PD-xx`, chronological.
 | PD-43 | EU only, no exception: the US endpoint is revoked, all model work runs on the self-hosted tier (issue #19) | decided; applied in repo, not on SERVER | 2026-10-21 |
 | PD-44 | Vercel removed: the parcel frontend runs only on SERVER, a static export in one web container per environment (issue #22) | applied | 2026-10-21 |
 | PD-45 | Parcel frontend hosting: read-only web container plus an SSH forced-command deploy account per environment; Caddy routes (issue #25) | applied | 2026-10-21 |
+| PD-49 | Scoreboard rendered only from the chain: check ids on events, verification and suite results as events; eight checks still evaluated outside the gateway | verified | 2026-10-21 |
 | PD-48 | Evidence reconciled against GitHub's own records: collector + gateway judge; never-reported historical gates listed, not failed; every merge so far is a self-merge | verified | 2026-10-21 |
 | PD-47 | Gateway restarts lost unflushed audit events from WORM (hot copy kept them); flush on shutdown and recovery at startup | verified | 2026-10-21 |
 | PD-46 | Sandboxes shared the governance network: could reach Postgres, MinIO, OPA and the egress proxy; now on a dedicated internal network with the gateway only (issue #26) | verified | 2026-10-21 |
@@ -543,6 +544,16 @@ gateway:8000 REACHABLE · everything else blocked (name resolution fails: the se
 **Not covered.** Provider audit logs: none exist in the replica (PD-41/PD-43); the self-hosted tier's "provider" is our own Ollama. Deploy events: no release workflow has run yet. Completeness of the gateway's own request events against a client-side log: open.
 **Pros.** Completeness is now asserted against an external system's records, in both directions, and the result is itself in the chain. **Cons.** The collector runs under a human identity on a schedule we choose, not as part of CI; a merge made and deleted between two runs would be missed by GitHub's API as well (the repository audit log is organisation-only on GitHub, PD-20).
 **Applied in.** `stack/gateway/app/scm.py`, endpoints, `stack/cli/agl reconcile`, suite S27, report. Verified on SERVER: 18 records imported, steady-state run matches all, exit 0.
+**Status.** verified.
+
+## PD-49 — Scoreboard rendered only from the evidence store
+
+**Problem.** Gap 4 (docs/11; issue #9): the report was derived from the suite's log, not from evidence, and linked to nothing.
+**Decision.** Three pieces of evidence plumbing and one page. (1) Every request the suite makes carries `x-agl-check`, so events record which check produced them. (2) A chain verification appends a `chain_verified` event with its figures, so the act of verifying is itself in the chain. (3) The suite's verdict per check is recorded in `run_finished`. `GET /agl/scoreboard/<run>` is built solely from the events of that run; `/scoreboard` renders verdict, per-check rows (proof, Annex A control, result, the events it produced as links that open the record), chain verifications, reconciliations, configuration digests and drift. `/agl/runs` lists runs.
+**Verified (2026-10-21, run `run-8e0de50c60b5`):** 34 checks, all with recorded results, 41 chain events for the run, chain verifications (pass; simulated tamper → fail with one broken link) and reconciliations for both repositories with their records; the page lists one event outside any check (the run's own finish).
+**Findings.** (a) A check and a scenario may differ in name (S2a vs S2); checks inherit their scenario's events. (b) The suite's quoting of the results JSON broke on the first run; one earlier run's finish was back-filled from its own log and the event says so. (c) **Eight checks have no gateway event** because they are evaluated outside the gateway: S10a/b (database trigger), S11 (Object Lock), S14 (schema), S25a/b (egress probe), S26 (policy unit tests), S28 (sandbox probe). Their result rests on the suite's word in `run_finished`, not on a chain event of their own. Turning them into gateway-executed canaries that write their own observations is the substance of gap 9 (#14).
+**Pros.** The DoD sentence "rendered only from reconciled evidence, linking to each record" is now literally true for everything the gateway sees. **Cons.** See (c); and the page needs a token with a security role to open other people's records.
+**Applied in.** `stack/gateway/app/main.py` (scoreboard, runs, checks map), `static/scoreboard.html`, `audit.py`, `runs.py`, `stack/cli/agl`, `demo/run-scenarios.sh` (PR #35).
 **Status.** verified.
 
 ## Template for new entries
