@@ -4,7 +4,7 @@ from decimal import Decimal
 from fastapi import FastAPI, Request, Header, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse, FileResponse, RedirectResponse
 import os as _os
-from . import config, db, auth, dlp, policy, ledger, audit, formats, providers, runs, scm
+from . import config, db, auth, dlp, policy, ledger, audit, formats, providers, runs, scm, canaries
 
 app = FastAPI(title="AGL gateway", version="0.1.0")
 
@@ -541,6 +541,20 @@ async def scm_reconcile(request: Request, authorization: str | None = Header(Non
 def scm_records(repo: str, authorization: str | None = Header(None)):
     i = _ident(authorization); require_role(i, "security_admin", "auditor", "platform_admin", "dpo")
     return {"repo": repo, "records": list(scm.existing_records(repo).values())}
+
+# ---------- canaries executed by the gateway (DoD; issue #14)
+@app.get("/agl/canaries")
+def canaries_list(authorization: str | None = Header(None)):
+    _ident(authorization)
+    return {"canaries": [{"id": k, "proof": v[0], "description": v[1]} for k, v in canaries.CANARIES.items()]}
+
+@app.post("/agl/canary/run")
+async def canaries_run(request: Request, authorization: str | None = Header(None)):
+    i = _ident(authorization); require_role(i, "security_admin", "auditor", "platform_admin", "developer", "team_lead")
+    b = await request.json() if await request.body() else {}
+    tok = authorization.split(" ", 1)[1].strip()
+    import anyio
+    return await anyio.to_thread.run_sync(lambda: canaries.run(b.get("ids"), tok, i["id"], i["subject"]))
 
 # ---------- scoreboard, rendered only from the chain (DoD; issue #9)
 @app.get("/agl/scoreboard/{run_id}")
