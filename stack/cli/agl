@@ -124,6 +124,8 @@ def main():
     s = sub.add_parser("audit"); au = s.add_subparsers(dest="sub", required=True)
     au.add_parser("flush"); au.add_parser("anchor"); v = au.add_parser("verify"); v.add_argument("--simulate-tamper", action="store_true")
     sub.add_parser("demo-reset", help="PoC: reset control-plane demo state (logged; audit chain untouched)")
+    s = sub.add_parser("canary", help="fire the gateway-executed canaries"); cs = s.add_subparsers(dest="sub", required=True)
+    x = cs.add_parser("run"); x.add_argument("ids", nargs="*"); cs.add_parser("list")
     s = sub.add_parser("reconcile", help="collect GitHub merge records (gh) and reconcile them against the audit chain")
     s.add_argument("repos", nargs="+", help="owner/name ...")
     s.add_argument("--base", default="main"); s.add_argument("--limit", type=int, default=200)
@@ -189,6 +191,16 @@ def main():
         call("POST", f"/agl/sandbox/{b['sandbox_id']}/destroyed", {})
         sys.exit(rc)
     if args.cmd == "demo-reset": out(*call("POST", "/agl/admin/demo-reset", {})[::2])
+    if args.cmd == "canary":
+        if args.sub == "list": out(*call("GET", "/agl/canaries")[::2])
+        st, h, b = call("POST", "/agl/canary/run", {"ids": args.ids or None})
+        if st >= 400: out(st, b)
+        for c in b["canaries"]:
+            print(f"  {c['result'].upper():7} {c['id']:13} {c['proof']}")
+            if c.get("negative"): print(f"          - {c['negative']['action']} → {c['negative']['observed']}")
+            if c.get("positive"): print(f"          + {c['positive']['action']} → {c['positive']['observed']}")
+            if c.get("error"): print(f"          ! {c['error']}")
+        print(f"== canaries: {b['result']}"); sys.exit(0 if b["result"] == "pass" else 1)
     if args.cmd == "reconcile":
         overall = "pass"; results = []
         for repo in args.repos:

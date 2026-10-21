@@ -175,9 +175,9 @@
   "annex": "A.5.23, A.5.31"
  },
  "S29": {
-  "proof": "PR-3 EU only",
-  "title": "Self-hosted model down: the request fails, nothing falls back to another model",
-  "annex": "A.5.23, A.8.14"
+  "proof": "All guardrails",
+  "title": "Gateway-executed canaries: negative refused, positive passed, both recorded",
+  "annex": "A.5.36, A.8.29"
  },
  "S26": {
   "proof": "Policy as code",
@@ -248,5 +248,45 @@
   "proof": "Client questions",
   "title": "The feature catalog is listed by the gateway without a model",
   "annex": "A.5.10"
+ },
+ "C-SECRET": {
+  "proof": "G3",
+  "title": "A credential pattern is blocked; a clean prompt passes",
+  "annex": ""
+ },
+ "C-RESTRICTED": {
+  "proof": "G1",
+  "title": "RESTRICTED never reaches a model",
+  "annex": ""
+ },
+ "C-QUARANTINE": {
+  "proof": "G1/G5",
+  "title": "Quarantined repository refused, allowed one passes",
+  "annex": ""
+ },
+ "C-NON-EU": {
+  "proof": "G2",
+  "title": "No approved non-EU endpoint can be registered",
+  "annex": ""
+ },
+ "C-AUDIT-DEL": {
+  "proof": "G6",
+  "title": "Gateway role cannot delete audit rows",
+  "annex": ""
+ },
+ "C-WORM": {
+  "proof": "G6",
+  "title": "Locked segment cannot be deleted even by root",
+  "annex": ""
+ },
+ "C-TAMPER": {
+  "proof": "G6",
+  "title": "Edited event breaks verification",
+  "annex": ""
+ },
+ "C-EGRESS": {
+  "proof": "G2/G3",
+  "title": "No route to a non-EU host",
+  "annex": ""
  }
 }
