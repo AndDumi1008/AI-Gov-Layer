@@ -17,7 +17,6 @@ evidence/*
 !evidence/.gitkeep
 node_modules/
 dist/
-.vercel/
 __pycache__/
 *.pyc
 stack/dns/zones/db.shortandsweet.home.ro

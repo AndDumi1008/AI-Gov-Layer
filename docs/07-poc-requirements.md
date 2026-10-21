@@ -271,7 +271,7 @@ agl-poc/
 | Demo repository with `pipeline/` files, ruleset imported, environments `preview` / `staging` / `production` | GitHub (or GitLab) | S15–S18: labels, bot approval ignored, human release approval |
 | GitHub Actions | GitHub-hosted runners for the PoC (location decision PD-16 is for production) | Gate 1, Gate 2, release |
 | `ghcr.io` | GitHub | Signed images, SBOM and provenance attestations |
-| Supabase stacks `preview` / `staging` / `production` + Vercel frontend (see §10.6; replaces kind/Kyverno/Argo CD) | SERVER + Vercel | S17: unsigned or preview-attested artifact refused by the production job; S18: human-only release approval; real RLS-backed role views |
+| Supabase-format stacks `preview` / `staging` / `production` + static frontend containers (see §10.6; replaces kind/Kyverno/Argo CD) | SERVER | S17: unsigned or preview-attested artifact refused by the production job; S18: human-only release approval; real RLS-backed role views |
 | Release runner `server-release` on `release-net` | SERVER | The only path into `prod-net`; exists for the production job alone |
 | Console page | container on `agl-net`, port 3000 | Spend, decisions, chain status over the Postgres hot copy |
 
@@ -435,9 +435,9 @@ Two registry entries, and the policy decides which one a request may reach. The 
 
 For production, whether Anthropic's own data-residency and zero-retention options satisfy D-02 is a procurement and legal check against the contract in force at the time, recorded in the registry; the PoC must not pre-empt it.
 
-## 10.6 Demo application: the parcel app on Supabase (SERVER) + Vercel
+## 10.6 Demo application: the parcel app on SERVER (Supabase-format backend, static frontend)
 
-Decided 2026-10-19 (register PD-19). The PoC governs a real application: the parcel booking service from the data-journey demo, with a self-hosted Supabase backend on SERVER and a Next.js frontend deployed by Vercel. This replaces the kind + Kyverno + Argo CD part of Tier 2; the two human gates, build-once and environment-scoped credentials stay.
+Decided 2026-10-19 (register PD-19). The PoC governs a real application: the parcel booking service from the data-journey demo, with a self-hosted Supabase backend on SERVER and a Next.js frontend. This replaces the kind + Kyverno + Argo CD part of Tier 2; the two human gates, build-once and environment-scoped credentials stay. **Revised 2026-10-21 (PD-44):** the frontend runs on SERVER as well, as a static export served by one web container per environment; no external hosting platform is used.
 
 ### What the app is (deliberately small)
 
@@ -453,26 +453,27 @@ Decided 2026-10-19 (register PD-19). The PoC governs a real application: the par
 
 Three backend stacks, one Compose project each, on separate networks; Caddy joins each network and routes by hostname. **Revised 2026-10-20 (PD-40):** each stack is PostgreSQL 16 + PostgREST, the data API at Supabase's core, instead of the twelve-service Supabase self-host bundle. The migrations stay in Supabase format and the JWT claims match Supabase Auth, so a full Supabase stack (self-hosted or cloud EU region) is a configuration change later. Definition in `parcel-app/deploy/preview/`.
 
-| Env | Hostname (API) | Network | Data | Reachable from |
-|-----|----------------|---------|------|----------------|
-| `preview` | `preview-api.shortandsweet.home.ro` | `preview-net` | masked seed, **reset per PR** by the preview job (migrations forward, seed reload) | Mac browser (tailnet), CI runner `server` |
-| `staging` | `staging-api.shortandsweet.home.ro` | `staging-net` | masked seed, migrated on every main merge | Mac browser, runner `server` |
-| `production` | `api.shortandsweet.home.ro` | `prod-net` | the "real" data (still synthetic in the PoC, but **treated as RESTRICTED**) | Mac browser only, and the **release runner** `server-release` during the approved production job. Not `agl-net`, not sandboxes, not the `server` runner |
+| Env | Hostname (frontend) | Hostname (API) | Network | Data | Reachable from |
+|-----|---------------------|----------------|---------|------|----------------|
+| `preview` | `preview.parcel.shortandsweet.home.ro` | `preview-api.shortandsweet.home.ro` | `preview-net` | masked seed, **reset per PR** by the preview job (migrations forward, seed reload) | Mac browser (tailnet), CI runner `server` |
+| `staging` | `staging.parcel.shortandsweet.home.ro` | `staging-api.shortandsweet.home.ro` | `staging-net` | masked seed, migrated on every main merge | Mac browser, runner `server` |
+| `production` | `parcel.shortandsweet.home.ro` | `api.shortandsweet.home.ro` | `prod-net` | the "real" data (still synthetic in the PoC, but **treated as RESTRICTED**) | Mac browser only, and the **release runner** `server-release` during the approved production job. Not `agl-net`, not sandboxes, not the `server` runner |
 
-The frontend lives on Vercel in all three cases (preview deployment per PR, a `staging` alias, and production). The browser on the Mac loads the frontend from Vercel and calls the backend hostname over the tailnet; Vercel's servers never reach SERVER. Server-side rendering that needs the backend is therefore out of scope for the PoC (client-side data fetching only), which is also the simplest way to prove that no backend data passes through Vercel.
+The frontend runs on SERVER in all three environments: one small static web container per environment (`web-preview`, `web-staging`, `web`) on that environment's network, behind Caddy at the frontend hostnames above. The browser on the Mac loads the static export from Caddy and calls the backend hostname over the tailnet. The bundle carries no environment: it reads its backend URL from `/config.json`, which `make web-deploy` writes per environment beside the release, so the artifact production serves is byte-for-byte the one tested in preview and staging. Server-side rendering that needs the backend is out of scope for the PoC (client-side data fetching only), which keeps the web containers free of credentials. There is one preview at a time: the preview backend is already reset per PR, and the preview web container follows the same rule.
+
+Each web container serves `current/` and `config.json` read-only from its environment's web volume; `releases/<digest>/` keeps every deployed artifact, so a rollback switches `current` back without rebuilding. Write access to a volume is that environment's `WEB_DEPLOY_KEY` (an SSH key whose forced command runs only `web-deploy` and `web-rollback` for that environment), reachable on that environment's network. The frontend is therefore guarded by the same two factors as the database URLs: an environment secret, and a runner that can route there (`server` for preview and staging, `server-release` alone for production).
 
 ```mermaid
 flowchart LR
   subgraph MAC["Mac browser (tailnet)"]
-    B[app.vercel.app / pr-N.vercel.app]
+    B[parcel. / staging.parcel. / preview.parcel.]
   end
-  V[(Vercel: static + edge bundle)] --> B
   B -->|https over tailnet| CADDY
   subgraph SERVER
     CADDY[caddy :443 on 100.x]
-    CADDY --> PREV[preview-net<br/>supabase pr stack]
-    CADDY --> STG[staging-net<br/>supabase staging]
-    CADDY --> PROD[prod-net<br/>supabase production]
+    CADDY --> PREV[preview-net<br/>web-preview + preview stack]
+    CADDY --> STG[staging-net<br/>web-staging + staging stack]
+    CADDY --> PROD[prod-net<br/>web + production stack]
     RUN[runner server<br/>ci-net] --> PREV & STG
     RREL[runner server-release<br/>release-net] --> PROD
     AGL[agl-net: gateway…]
@@ -489,26 +490,26 @@ Routes that must not exist, and are probed by the isolation test: `agl-net → p
 | Gate | What runs | Where | Credentials |
 |------|-----------|-------|-------------|
 | Gate 1 | env-vars, secrets, lint, typecheck, unit tests, `supabase db lint`, dependency allowlist | runner `server` | read-only token |
-| Gate 2 | `next build` once → prebuilt artifact (`.vercel/output`), hashed and signed (cosign blob); migrations applied forward on the **preview** stack from the current staging schema with the expand/contract check; `vercel deploy --prebuilt` as a **preview deployment** pointing at `preview-api`; e2e against it; N-1 contract tests | runner `server`, Vercel | `preview` environment: Vercel token scoped to the project, preview Supabase DB URL |
+| Gate 2 | `next build` once → static export (`out/`) packed as the prebuilt artifact, hashed and signed (cosign blob); migrations applied forward on the **preview** stack from the current staging schema with the expand/contract check; `make web-deploy` of the same artifact to `web-preview`, with `config.json` pointing at `preview-api`; e2e against it; N-1 contract tests | runner `server` | `preview` environment: `WEB_DEPLOY_KEY` for the preview web root, preview DB URL |
 | Human review | PR approval, CODEOWNERS for `supabase/migrations/` and `supabase/functions/` | GitHub | — |
 | Merge queue | reruns Gates 1–2; the signed prebuilt artifact from this run is the release candidate | runner `server` | — |
-| Staging | migrations on the staging stack; `vercel deploy --prebuilt` to the `staging` alias; soak | runner `server` | `staging` environment secrets |
+| Staging | migrations on the staging stack; `make web-deploy` of the same artifact to `web-staging`; soak | runner `server` | `staging` environment secrets |
 | Release approval | human reviewer on the `production` environment sees: artifact digest + signature, migration list with checksums, staging soak, AI-assisted PR list | GitHub | — |
-| Production | `supabase db push` against the production stack (forward only, same migration checksums), deploy edge functions, `vercel deploy --prebuilt --prod` of the **same** artifact digest | runner `server-release` only | `production` environment secrets: production DB URL, Vercel token; they exist only after approval and only on this runner label |
-| Rollback | frontend: `vercel rollback` to the previous deployment; database: forward-only compensating migration through the same path (expand/contract makes the previous frontend compatible with the current schema) | runner `server-release` | as above |
+| Production | `supabase db push` against the production stack (forward only, same migration checksums), deploy edge functions, `make web-deploy` of the **same** artifact digest to `web` | runner `server-release` only | `production` environment secrets: production DB URL, `WEB_DEPLOY_KEY` for the production web root; they exist only after approval and only on this runner label |
+| Rollback | frontend: `make web-rollback` switches `current` back to the previous release digest kept on the web volume; database: forward-only compensating migration through the same path (expand/contract makes the previous frontend compatible with the current schema) | runner `server-release` | as above |
 
-Vercel's own Git integration is **disabled** for production (and set to preview-only for PRs if used at all): a push to main must not deploy anything by itself; the approved job is the only path. The `vercel` CLI deploys the prebuilt output, so the artifact that was tested is the artifact that ships.
+Nothing deploys by itself: no web container watches the repository or pulls anything, so a push to main deploys nothing; the approved job is the only path. `web-deploy` checks the artifact against the digest again before unpacking, so the artifact that was tested is the artifact that ships.
 
 ### What changes in the `pipeline/` examples
 
-- `release-paas.yml` implements the table above (`supabase db push`, `vercel deploy --prebuilt`, migration checksum comparison, frontend rollback); `release.yml` remains the GitOps variant for container platforms.
-- `merge-candidate-paas.yml` builds the frontend once (`vercel build`), hashes and, in merge-queue runs only, signs the output as a blob, resets the preview Supabase stack, applies migrations with the expand/contract check and deploys a Vercel preview; `merge-candidate.yml` remains the container variant.
+- `release-paas.yml` implements the table above (`supabase db push`, `make web-deploy` of the verified digest, migration checksum comparison, frontend rollback with `make web-rollback`); `release.yml` remains the GitOps variant for container platforms.
+- `merge-candidate-paas.yml` builds the frontend once (`make web-build`, a static export), hashes and, in merge-queue runs only, signs the output as a blob, resets the preview stack, applies migrations with the expand/contract check and deploys the artifact to the preview web container; `merge-candidate.yml` remains the container variant.
 - `admission/` is not used for this app; its role is taken by the signed artifact digest verified in the production job before deploying, and by the migration checksum comparison.
 - `runs-on` for the production job reads `vars.AGL_RELEASE_RUNNER` (`server-release`), all other jobs `vars.AGL_RUNNER` (`server`).
 
 ### Residency and trust notes
 
-- **Vercel** (US platform): receives the frontend source during build, the prebuilt bundle, build logs and the browser's requests for static assets. No backend data, no party data. Treated like GitHub in PD-16: acceptable for the PoC with synthetic code; a production decision for Phase 0.
+- **Frontend**: built on the runner on SERVER and served from SERVER; no hosting account outside SERVER, and the browser's requests for static assets stay on the tailnet. The prebuilt artifact is still stored as a GitHub Actions artifact between jobs, the same exposure as the source code on GitHub (PD-16, PD-18).
 - **Supabase self-hosted**: no Supabase cloud account involved; the stacks are plain containers on SERVER. The Supabase MCP server available in this workspace is a cloud tool and is **not** used for the PoC backends; if used at all it is for a separate scratch project and never pointed at `prod-net`.
 - **Resources**: each Supabase stack is roughly 1.5–2 GB RAM; three stacks plus AGL plus a local model want 24 GB on SERVER, or drop the local model to a mock while the stacks are up.
 
@@ -529,9 +530,9 @@ SERVER is a Windows 10 Pro machine (i7-7700, 64 GB RAM, NVIDIA GTX 1070 8 GB). C
 | DNS | No DNS software is running on SERVER today; the public `shortandsweet.home.ro` record points at the home WAN IP and has no subdomains | Run **CoreDNS** as a container bound to SERVER's Tailscale IP on port 53, serving the zone `shortandsweet.home.ro` with a wildcard to that IP; add a Tailscale split-DNS rule for the domain. The public apex record stays as it is and is not used |
 | Hardware trust | Consumer hardware, no TPM attestation, BitLocker optional | Fine for a PoC; the production replacement is region-pinned infrastructure under contract |
 
-### Frontend hosting decision (PD-21)
+### Frontend hosting decision (PD-21, PD-44)
 
-First iteration: the parcel frontend runs **in Docker on SERVER** behind Caddy (one container per environment: `web-preview`, `web-staging`, `web`), built once into a static export or a Node image and promoted by digest. No external PaaS account is needed and the "nothing leaves SERVER except code to GitHub" story holds. The Vercel variant (`merge-candidate-paas.yml`, `release-paas.yml`) stays in the repository as the PaaS demonstration and can be switched on later by setting the Vercel secrets; the production step then deploys the same prebuilt artifact to both or either.
+The parcel frontend runs **in Docker on SERVER** behind Caddy (one container per environment: `web-preview`, `web-staging`, `web`), built once into a static export and promoted by digest. No external PaaS account is needed and the "nothing leaves SERVER except code to GitHub" story holds. **Revised 2026-10-21 (PD-44):** this is the only frontend hosting; `merge-candidate-paas.yml` and `release-paas.yml` deploy the static export to these containers with `make web-deploy`, and no external hosting variant is kept.
 
 ### GitHub at zero cost: public repositories in a free organisation (PD-20)
 
@@ -558,5 +559,5 @@ The organisation setting "Allow GitHub Actions to create and approve pull reques
 | Supabase (self-hosted containers) | €0 |
 | Local model (open weights on the GTX 1070) | €0 beyond electricity |
 | Caddy, CoreDNS, OPA, MinIO, Postgres | €0 |
-| Vercel | not used in the first iteration; Hobby tier is free but not for commercial use |
+| Frontend hosting (static web containers on SERVER) | €0 |
 | Anthropic API | pay per token; the budget ledger caps it; expect single-digit euros for the whole demo |

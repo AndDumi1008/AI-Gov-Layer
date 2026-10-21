@@ -71,6 +71,7 @@ IDs are `PD-xx`, chronological.
 | PD-40 | parcel-app backend: PostgreSQL + PostgREST (Supabase core) per environment instead of the full self-host bundle | applied | 2026-10-20 |
 | PD-41 | No cloud account or spend in the PoC: an EU-region external model endpoint is out of scope; US-endpoint exception decision deferred (issue #19) | decided | 2026-10-21 |
 | PD-42 | GitHub Issues is the ticket system; every PR must reference an issue, enforced by the `ticket` check | applied | 2026-10-21 |
+| PD-44 | Vercel removed: the parcel frontend runs only on SERVER, a static export in one web container per environment (issue #22) | applied | 2026-10-21 |
 
 ---
 
@@ -457,6 +458,17 @@ IDs are `PD-xx`, chronological.
 **Problem.** The brief's working rule "every change traceable to a ticket" scored Missing in docs/11.
 **Decision (owner, 2026-10-21).** GitHub Issues on both repositories. One issue per ranked gap (#6–#18) and one decision issue (#19). A `ticket` job in both CI workflows fails a PR whose title or description does not reference an issue (`#n` or `owner/repo#n`), and the rulesets require it. The PR template carries a `Ticket:` line.
 **Pros.** Zero cost; the reference is enforced, not requested. **Cons.** A reference is not a justification; review still has to check that the PR does what the issue says.
+**Status.** applied.
+
+## PD-44 — Vercel removed: the parcel frontend runs only on SERVER
+
+**Problem.** PD-19 put the parcel frontend on Vercel; PD-21 moved it to Docker on SERVER first but kept the Vercel workflows as a dormant variant. On 2026-10-21 the owner stated that Vercel is no longer used, and PD-43 requires everything to stay in the EU. Issue #22.
+**Why it matters.** Vercel is a US platform that would receive the frontend source, the bundle and the build logs. A dormant variant is still a documented one-switch path out of the EU, and the PaaS workflows had no other deploy target.
+**Fixes considered.** (a) Static export built once, one static web container per environment on SERVER behind Caddy, deployed with `make web-deploy` and rolled back with `make web-rollback`. (b) A Node container image built once and promoted by digest through a registry on SERVER. (c) Keep Vercel dormant.
+**Thought process.** (c) contradicts PD-43 and the owner's statement. (b) adds a registry service to run (GHCR is outside the EU) for no proof that (a) lacks. (a) keeps the docs/08 invariants: one build, one hash, a release signature only from the merge queue, the same digest promoted to preview, staging and production; the backend URL lives in a per-environment `config.json` outside the bundle.
+**Decision (owner, 2026-10-21).** (a). Each web container serves its environment's web volume read-only (`current/` → `releases/<digest>/`, plus `config.json`). Write access is the environment secret `WEB_DEPLOY_KEY`, an SSH key whose forced command runs only `web-deploy` and `web-rollback` for that environment, so the frontend has the same two factors as the database URLs: an environment secret and a runner that can route there. The Vercel frontend of PD-19 and the dormant variant of PD-21 are superseded; those entries stay as history.
+**Pros.** No hosting account outside SERVER and no deploy token held by a third party; a rollback is a pointer switch to a digest that was already verified. **Cons.** One preview at a time, as the preview backend already was; concurrent PRs overwrite each other's preview and are serialised by hand. The prebuilt artifact still passes through GitHub Actions artifact storage, like the source code (PD-16, PD-18). The web containers, their Caddy routes, the `WEB_DEPLOY_KEY` endpoint and the `web-build` / `web-deploy` / `web-rollback` targets do not exist yet; they come with the frontend in `parcel-app`.
+**Applied in.** `pipeline/.github/workflows/merge-candidate-paas.yml` and `release-paas.yml` (Vercel CLI and `VERCEL_*` secrets and variables replaced by `make web-build`, `web-deploy`, `web-rollback` with `WEB_DEPLOY_KEY`; the rollback audit event now carries the digest); `pipeline/README.md`; PoC §10.3 Tier 2 table, §10.6, §10.7; `.gitignore` here and in `parcel-app` (`.vercel/` removed). actionlint passes.
 **Status.** applied.
 
 ---

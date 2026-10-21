@@ -1,18 +1,20 @@
-# Release (PaaS variant) — parcel app: Supabase on SERVER + Vercel frontend.
+# Release (PaaS variant) — parcel app: Supabase-format backend and static frontend, both on SERVER.
 #
 # resolve     : find the merge_group run of merge-candidate-paas for THIS main commit, download
 #               its prebuilt artifact, verify the cosign blob signature came from that workflow on
 #               a merge_group run with this SHA (PD-10). No free-form inputs.
 # staging     : migrate the staging stack, deploy functions, deploy the SAME artifact to the
-#               staging alias on Vercel, soak.                              runner: server
+#               staging web container, soak.                                runner: server
 # release-notes: release candidate record incl. migration checksums and AI-assisted PRs.
 # production  : HUMAN approval on the `production` environment; then migration checksum
-#               comparison, supabase db push to the production stack, functions, vercel --prod
-#               of the same artifact.                                       runner: server-release
+#               comparison, supabase db push to the production stack, functions, web-deploy
+#               of the same artifact to the production web container.       runner: server-release
 #               (the only runner with a route into prod-net; its secrets are environment secrets)
-# rollback    : workflow_dispatch action=rollback-frontend → vercel rollback; the database is
-#               forward-only (expand/contract), so no automatic schema rollback exists.
-# PD-12: no long-lived tokens; VERCEL_TOKEN and DB URLs are environment secrets.
+# rollback    : workflow_dispatch action=rollback-frontend → make web-rollback (previous release
+#               digest, kept on the web volume); the database is forward-only (expand/contract),
+#               so no automatic schema rollback exists.
+# PD-12: WEB_DEPLOY_KEY and the DB URLs are environment secrets; production's exist only after approval.
+# PD-44: the frontend runs on SERVER, one web container per environment behind Caddy.
 # PD-13: audit events carry this workflow's OIDC token.
 name: release-paas
 
@@ -91,22 +93,18 @@ jobs:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # ratchet:actions/download-artifact@v4
         with:
           name: release-${{ github.sha }}
-      - run: sha256sum -c prebuilt.sha256 && mkdir -p .vercel && tar -C .vercel -xf prebuilt.tar
+      - run: sha256sum -c prebuilt.sha256
       - uses: supabase/setup-cli@1dedf2c611547ede7232d26866dd3c56ab903bbb # ratchet:supabase/setup-cli@v1
         with: {version: "2.x"}
       - name: Migrate staging stack (forward only) + functions
         run: |
           supabase db push --db-url "${{ secrets.STAGING_DB_URL }}" --include-all
           make functions-deploy ENV=staging
-      - name: Deploy the same artifact to the staging alias
-        env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+      - name: Deploy the same artifact to the staging web container
+        env: {WEB_DEPLOY_KEY: "${{ secrets.WEB_DEPLOY_KEY }}"}
         run: |
-          URL=$(npx vercel@39 deploy --prebuilt --yes --token "$VERCEL_TOKEN" \
-                --env AGL_BACKEND_URL=https://staging-api.shortandsweet.home.ro --meta sha=${{ github.sha }})
-          npx vercel@39 alias set "$URL" staging.parcel.shortandsweet.home.ro --token "$VERCEL_TOKEN"
+          make web-deploy ENV=staging ARTIFACT=prebuilt.tar DIGEST=${{ needs.resolve.outputs.digest }} \
+               BACKEND_URL=https://staging-api.shortandsweet.home.ro
       - name: Soak (SLO checks against staging)
         run: make staging-soak BASE_URL=https://staging.parcel.shortandsweet.home.ro MINUTES=30
 
@@ -160,7 +158,7 @@ jobs:
         with:
           name: release-${{ github.sha }}
       - name: Re-verify the artifact on the release runner
-        run: sha256sum -c prebuilt.sha256 && mkdir -p .vercel && tar -C .vercel -xf prebuilt.tar
+        run: sha256sum -c prebuilt.sha256
       - name: Migration checksums must equal what was tested and approved
         run: ( cd supabase/migrations && sha256sum -- *.sql ) | diff - migrations.sha256
       - uses: supabase/setup-cli@1dedf2c611547ede7232d26866dd3c56ab903bbb # ratchet:supabase/setup-cli@v1
@@ -169,12 +167,11 @@ jobs:
         run: |
           supabase db push --db-url "${{ secrets.PROD_DB_URL }}" --include-all
           make functions-deploy ENV=production
-      - name: Deploy the same artifact to production on Vercel
-        env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
-        run: npx vercel@39 deploy --prebuilt --prod --yes --token "$VERCEL_TOKEN" --env AGL_BACKEND_URL=https://api.shortandsweet.home.ro --meta sha=${{ github.sha }}
+      - name: Deploy the same artifact to the production web container
+        env: {WEB_DEPLOY_KEY: "${{ secrets.WEB_DEPLOY_KEY }}"}
+        run: |
+          make web-deploy ENV=production ARTIFACT=prebuilt.tar DIGEST=${{ needs.resolve.outputs.digest }} \
+               BACKEND_URL=https://api.shortandsweet.home.ro
       - name: Record deploy event in the AGL audit chain (OIDC-authenticated)
         env: {AGL_AUDIT_URL: "${{ vars.AGL_AUDIT_URL }}"}
         run: |
@@ -194,12 +191,13 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - name: Vercel rollback to the previous production deployment
-        env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
-        run: npx vercel@39 rollback --yes --token "$VERCEL_TOKEN"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # ratchet:actions/checkout@v4
+      - name: Point production back at the previous release digest
+        id: rb
+        env: {WEB_DEPLOY_KEY: "${{ secrets.WEB_DEPLOY_KEY }}"}
+        run: |
+          D=$(make -s web-rollback ENV=production) # prints the digest now served
+          echo "digest=$D" >> "$GITHUB_OUTPUT"
       - name: Record rollback event
         env: {AGL_AUDIT_URL: "${{ vars.AGL_AUDIT_URL }}"}
         run: |
@@ -207,4 +205,4 @@ jobs:
           IDTOKEN=$(curl -fsS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
                     "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=agl-audit" | jq -r .value)
           curl -fsS -X POST "$AGL_AUDIT_URL/events" -H "Authorization: Bearer $IDTOKEN" -H 'content-type: application/json' \
-            -d "{\"type\":\"deploy_event\",\"variant\":\"paas\",\"environment\":\"production\",\"deploy_type\":\"rollback\",\"scope\":\"frontend\",\"run\":\"${{ github.run_id }}\",\"approver\":\"${{ github.triggering_actor }}\"}"
+            -d "{\"type\":\"deploy_event\",\"variant\":\"paas\",\"environment\":\"production\",\"deploy_type\":\"rollback\",\"scope\":\"frontend\",\"digest\":\"${{ steps.rb.outputs.digest }}\",\"run\":\"${{ github.run_id }}\",\"approver\":\"${{ github.triggering_actor }}\"}"
