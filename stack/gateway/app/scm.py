@@ -25,6 +25,16 @@ def existing_records(repo: str) -> dict:
         out[r["body"]["merge_commit"]] = r["body"]   # last write wins; records are append-only so re-imports are explicit
     return out
 
+PENDING = (None, "", "in_progress", "queued", "pending", "waiting")
+
+def _progressed(a: dict, b: dict) -> bool:
+    """True when the only difference is a post-merge run that was still pending in the chain and is final now."""
+    diff = {k for k in COMPARED if a.get(k) != b.get(k)}
+    if diff != {"post_merge_run"}:
+        return False
+    pa, pb = a.get("post_merge_run") or {}, b.get("post_merge_run") or {}
+    return pa.get("id") in (None, pb.get("id")) and pa.get("conclusion") in PENDING and pb.get("conclusion") not in PENDING
+
 def compare(existing: dict, incoming: list) -> dict:
     """Pure: decide imports, matches and mismatches. `existing` maps merge_commit → stored body; `incoming` are
     GitHub-derived records with at least the COMPARED fields and `pr`."""
@@ -39,6 +49,8 @@ def compare(existing: dict, incoming: list) -> dict:
         a, b = fingerprint(existing[mc]), fingerprint(rec)
         if a == b:
             matches.append(mc)
+        elif _progressed(a, b):
+            upgrades.append(rec); imports.append(rec); continue   # a run that was still in progress has completed: superseded, not mismatched
         else:
             diff = {k: {"chain": a[k], "scm": b[k]} for k in COMPARED if a[k] != b[k]}
             mismatches.append({"kind": "changed", "merge_commit": mc, "pr": rec.get("pr"), "diff": diff})

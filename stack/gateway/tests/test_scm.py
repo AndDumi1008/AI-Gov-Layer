@@ -29,3 +29,11 @@ def test_old_record_version_is_reimported_not_mismatched():
     old = rec("m1"); old.pop("gates_red"); old.pop("gates_not_reported"); old.pop("record_version")   # stored by the v1 collector
     r = scm.compare({"m1": old}, [rec("m1")])
     assert r["upgrades"] == ["m1"] and [x["merge_commit"] for x in r["imports"]] == ["m1"] and r["mismatches"] == []
+
+def test_completed_post_merge_run_is_an_upgrade_not_a_mismatch():
+    pending = rec("m1", post_merge_run={"id": 7, "conclusion": "", "name": "ci"})
+    final = rec("m1", post_merge_run={"id": 7, "conclusion": "success", "name": "ci"})
+    r = scm.compare({"m1": pending}, [final])
+    assert r["upgrades"] == ["m1"] and r["mismatches"] == []
+    other = rec("m1", post_merge_run={"id": 7, "conclusion": "success", "name": "ci"}, merged_by="z")
+    assert scm.compare({"m1": pending}, [other])["mismatches"][0]["kind"] == "changed"
