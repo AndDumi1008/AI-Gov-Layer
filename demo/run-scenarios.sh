@@ -145,7 +145,8 @@ docker compose -f stack/docker-compose.yml start "$SVC" >/dev/null 2>&1; sleep 3
 echo -e "\n== $pass passed, $fail failed. Evidence in $EV" | tee -a "$LOG"
 RESULT=$([ $fail -eq 0 ] && echo pass || echo fail)
 unset AGL_CHECK
-AGL_TOKEN_FILE="$EV/.tok-ines" $AGL run finish "$AGL_RUN" --result "$RESULT" --checks "$(python3 -c "import json,sys;print(json.dumps({'passed':$pass,'failed':$fail,'results':json.loads(sys.argv[1])}))" "$RESULTS")" > "$EV/run-finished.json" 2>/dev/null
+CHECKS_JSON=$(python3 -c 'import json,sys;print(json.dumps({"passed":int(sys.argv[1]),"failed":int(sys.argv[2]),"results":json.loads(sys.argv[3])}))' "$pass" "$fail" "$RESULTS")
+AGL_TOKEN_FILE="$EV/.tok-ines" $AGL run finish "$AGL_RUN" --result "$RESULT" --checks "$CHECKS_JSON" > "$EV/run-finished.json" 2>/dev/null
 AGL_TOKEN_FILE="$EV/.tok-ines" $AGL run show "$AGL_RUN" > "$EV/run.json" 2>/dev/null
 as ines events --limit 5 > "$EV/last-events.json" 2>/dev/null; as ines audit verify > "$EV/chain-verification.json" 2>/dev/null
 [ $fail -eq 0 ]
