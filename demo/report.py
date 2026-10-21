@@ -38,6 +38,16 @@ MAP = {  # scenario → (proof, control it demonstrates, ISO 27001:2022 Annex A)
  "S26": ("Policy as code", "Policy bundle unit tests pass", "A.8.9, A.8.25"),
  "S36": ("G6 Traceability", "Chain reconciled against GitHub's merge records: AI-Gov-Layer", "A.5.33, A.8.15, A.8.32"),
  "S36b":("G6 Traceability", "Chain reconciled against GitHub's merge records: parcel-app", "A.5.33, A.8.15, A.8.32"),
+ "S37": ("All guardrails", "Gateway-executed canaries: negative refused, positive passed, both recorded", "A.5.36, A.8.29"),
+ # canaries (stack/gateway/app/canaries.py): not in scenarios.log; listed so checks.json, the scoreboard's titles, stays this map's export
+ "C-SECRET":     ("G3", "A credential pattern is blocked; a clean prompt passes", ""),
+ "C-RESTRICTED": ("G1", "RESTRICTED never reaches a model", ""),
+ "C-QUARANTINE": ("G1/G5", "Quarantined repository refused, allowed one passes", ""),
+ "C-NON-EU":     ("G2", "No approved non-EU endpoint can be registered", ""),
+ "C-AUDIT-DEL":  ("G6", "Gateway role cannot delete audit rows", ""),
+ "C-WORM":       ("G6", "Locked segment cannot be deleted even by root", ""),
+ "C-TAMPER":     ("G6", "Edited event breaks verification", ""),
+ "C-EGRESS":     ("G2/G3", "No route to a non-EU host", ""),
 }
 
 def parse(log: str):
