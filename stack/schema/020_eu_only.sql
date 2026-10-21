@@ -11,13 +11,15 @@ update exception
  where type = 'model_enable' and scope->>'model_alias' = 'code-default' and status = 'approved';
 
 -- 2. Revoke every endpoint outside the EU/EEA. Rows stay for the audit trail; 'revoked' is never usable.
+--    The 002 check (EU or 'evaluating') would refuse 'revoked' on a US row, so it goes first; the
+--    replacement is added in 3, inside the same transaction.
+alter table model_endpoint drop constraint if exists model_endpoint_region_country_check;
 update model_endpoint set status = 'revoked'
  where status <> 'revoked'
    and (residency = 'NON_EU_EVALUATING'
         or region_country not in ('AT','BE','BG','HR','CY','CZ','DK','EE','FI','FR','DE','GR','HU','IE','IT','LV','LT','LU','MT','NL','PL','PT','RO','SK','SI','ES','SE','NO','IS','LI','CH'));
 
 -- 3. From now on a non-EU endpoint can exist only as revoked history; 'evaluating' no longer opens a door.
-alter table model_endpoint drop constraint if exists model_endpoint_region_country_check;
 alter table model_endpoint add constraint model_endpoint_region_country_check check (
   status = 'revoked'
   or (residency <> 'NON_EU_EVALUATING'
