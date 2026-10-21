@@ -32,8 +32,10 @@ class Chain:
 
     def append(self, type_: str, body: dict, actor_identity_id=None, team_id=None, model_endpoint_id=None, outcome=None, reasons=None, cost_eur=None) -> dict:
         with self.lock:
+            from .runs import current_run   # run correlation id from the x-agl-run header, if any
+            run_id = body.get("run_id") or current_run.get()
             ev = {"event_id": str(uuid.uuid4()), "ts": dt.datetime.now(dt.timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
-                  "type": type_, "schema_version": 1, **body, "prev_hash": self._last_hash()}
+                  "type": type_, "schema_version": 1, **({"run_id": run_id} if run_id else {}), **body, "prev_hash": self._last_hash()}
             ev["hash"] = event_hash(ev)
             seg_id = self.open[0]["_segment_id"] if self.open else str(uuid.uuid4())
             db.run("""insert into audit_event (event_id, ts, type, actor_identity_id, team_id, model_endpoint_id, outcome, reasons, cost_eur, segment_id, prev_hash, hash, body)
@@ -68,6 +70,25 @@ class Chain:
         self.open = []
         self.open_started = time.time()
         return {"segment_id": seg_id, "object_uri": uri, "events": len(events), "last_hash": last["hash"]}
+
+    def recover_orphans(self) -> list:
+        """Events that reached the hot copy but never a WORM segment (a restart with an open segment, before
+        PD-47). Re-emit them as segments in chain order, grouped by the segment id they were assigned."""
+        with self.lock:
+            rows = db.all_("""select body, segment_id from audit_event e
+                              where not exists (select 1 from audit_segment s where s.id = e.segment_id) order by seq""")
+            if not rows:
+                return []
+            results = []
+            groups: dict = {}
+            for r in rows:
+                groups.setdefault(str(r["segment_id"]), []).append(r["body"])
+            for seg_id, bodies in groups.items():
+                self.open = [dict(b, _segment_id=seg_id) for b in bodies]
+                res = self._flush_locked()
+                res["recovered"] = True
+                results.append(res)
+            return results
 
     def maybe_flush(self):
         if self.open and time.time() - self.open_started >= config.SEGMENT_MAX_SECONDS:
@@ -130,24 +151,46 @@ class Chain:
         hot = db.all_("select event_id, hash from audit_event order by seq")
         hot_map = {r["event_id"] if isinstance(r["event_id"], str) else str(r["event_id"]): r["hash"] for r in hot}
         hot_mismatch = [e["event_id"] for e in events if hot_map.get(e["event_id"]) != e["hash"]]
-        anchors = db.all_("select anchor_date, anchored_through, root_hash from audit_anchor order by anchored_through")
+        # An anchor is a statement about a specific list of segments (the document in the anchor store names them).
+        # Verify against that list, not against a time window: a segment recovered later (PD-47) must not
+        # invalidate an anchor that never covered it; it is simply uncovered until the next anchor.
+        anchors = db.all_("select anchor_date, anchored_through, root_hash, external_uri from audit_anchor order by anchored_through")
         anchor_results = []
+        db_last = {str(s["id"]): s["last_hash"] for s in segs}
+        uri_last = {s["object_uri"]: s["last_hash"] for s in segs}
+        covered = set()
         for a in anchors:
-            day_segs = db.all_("select last_hash from audit_segment where closed_at::date=%s and closed_at <= %s order by closed_at", (a["anchor_date"], a["anchored_through"]))
-            root = sha256("".join(s["last_hash"] for s in day_segs))
-            anchor_results.append({"date": a["anchor_date"].isoformat(), "through": a["anchored_through"].isoformat(), "segments": len(day_segs), "matches": root == a["root_hash"]})
+            try:
+                key = a["external_uri"].split(f"s3://{config.ANCHOR_BUCKET}/", 1)[1]
+                doc = json.loads(self.anchor_s3.get_object(Bucket=config.ANCHOR_BUCKET, Key=key)["Body"].read().decode())
+                listed = doc.get("segments", [])
+                root = sha256("".join(s["last_hash"] for s in listed)) if listed else sha256("")
+                present = all(uri_last.get(s["uri"]) == s["last_hash"] for s in listed)
+                covered.update(s["uri"] for s in listed)
+                anchor_results.append({"date": a["anchor_date"].isoformat(), "through": a["anchored_through"].isoformat(), "segments": len(listed),
+                                       "matches": root == a["root_hash"] == doc.get("root_hash") and present, "listed_segments_intact": present})
+            except Exception as e:  # anchor document unreadable: that is a failure in itself
+                anchor_results.append({"date": a["anchor_date"].isoformat(), "through": a["anchored_through"].isoformat(), "segments": None, "matches": False, "error": str(e)[:120]})
+        uncovered = [s["object_uri"] for s in segs if s["object_uri"] not in covered]
         result = "pass" if not broken and not hot_mismatch and all(x["matches"] for x in anchor_results) else "fail"
         db.run("insert into chain_verification (range_start, range_end, result, details) values (%s,%s,%s,%s)",
                (events[0]["ts"] if events else dt.datetime.now(dt.timezone.utc), events[-1]["ts"] if events else dt.datetime.now(dt.timezone.utc), result,
                 json.dumps({"events": len(events), "broken": broken[:10], "hot_mismatch": len(hot_mismatch), "anchors": anchor_results, "simulated_tamper": tampered_at})))
         return {"result": result, "events_verified": len(events), "segments": seg_results, "broken_links": broken, "hot_copy_mismatches": len(hot_mismatch),
-                "anchors": anchor_results, "simulated_tamper_event": tampered_at, "head_hash": events[-1]["hash"] if events else None}
+                "anchors": anchor_results, "segments_not_yet_anchored": len(uncovered), "simulated_tamper_event": tampered_at, "head_hash": events[-1]["hash"] if events else None}
 
 chain: Chain | None = None
 
 def start():
     global chain
     chain = Chain()
+    try:
+        rec = chain.recover_orphans()
+        if rec:
+            print("audit: recovered orphan events into WORM segments:", rec)
+            chain.append("audit_recovery", {"segments": rec, "note": "hot-copy events without a WORM segment re-emitted at startup (PD-47)"}, outcome="recovered")
+    except Exception as e:  # noqa
+        print("audit: orphan recovery failed:", e)
     def loop():
         while True:
             time.sleep(5)

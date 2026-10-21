@@ -74,6 +74,7 @@ IDs are `PD-xx`, chronological.
 | PD-43 | EU only, no exception: the US endpoint is revoked, all model work runs on the self-hosted tier (issue #19) | decided; applied in repo, not on SERVER | 2026-10-21 |
 | PD-44 | Vercel removed: the parcel frontend runs only on SERVER, a static export in one web container per environment (issue #22) | applied | 2026-10-21 |
 | PD-45 | Parcel frontend hosting: read-only web container plus an SSH forced-command deploy account per environment; Caddy routes (issue #25) | applied | 2026-10-21 |
+| PD-47 | Gateway restarts lost unflushed audit events from WORM (hot copy kept them); flush on shutdown and recovery at startup | verified | 2026-10-21 |
 | PD-46 | Sandboxes shared the governance network: could reach Postgres, MinIO, OPA and the egress proxy; now on a dedicated internal network with the gateway only (issue #26) | verified | 2026-10-21 |
 
 ---
@@ -480,7 +481,7 @@ Against the project's rules, the sessions currently stand as follows.
 **Scope (open, asked of the owner).** Applied to governed model inference. Still outside the EU or under US jurisdiction: GitHub.com and GitHub-hosted runners (PD-39), Tailscale coordination, public image and package registries (gap 8, #13), the Claude desktop app (PD-38), and the AI assistant used to build this PoC. `eu_residency` means processing location: `EU_REGION_HYPERSCALER` providers have US parents, which a jurisdiction reading of "EU only" would exclude (provider `parent_country` is not yet a policy input). Vercel is no longer used (owner, 2026-10-21); the PaaS pipeline examples and docs/07 §10.6 still describe it and need their own change.
 **Open.** (1) The revocation is SQL, so the hash chain has no `registry_change` event for it (the G9 gap); a gateway admin path that appends one should run on SERVER together with the migration. (2) Look back, recorded 2026-10-21 after applying the migration on SERVER: **44 completions** went to the US endpoint between 2026-10-20 11:03 UTC and 2026-10-21 14:44 UTC, total €0.1855 at list price, all on synthetic prompts (scenario suite, chat tests, Claude Code probes). The provider row says `zero_retention = false`; a deletion request is the owner's call (no real data was involved). (3) Owner: remove `ANTHROPIC_API_KEY` from SERVER's `stack/.env` and revoke the key in the provider console. (4) Owner: apply on SERVER (020 migration, rebuild `gateway` and `egress-proxy`, `make demo-server`). (5) docs/07 §10.5 says a Mac firewall or exit-node rule blocks the provider host; nothing in the repository sets one.
 **Applied in.** Branch `policy/eu-only` (issue #19).
-**Status.** applied on SERVER 2026-10-21: migration `020_eu_only.sql` run on the live database (exception `closed`, `code-default` → `revoked`, chargeback price active), Anthropic key removed from `stack/.env` by the owner, stack rebuilt from `main` with the proxy detached from `egress-net`. Open: (1) the `registry_change` event for the revocation; (3) deletion request decision.
+**Status.** applied on SERVER 2026-10-21: migration `020_eu_only.sql` run on the live database (exception `closed`, `code-default` → `revoked`, chargeback price active), Anthropic key removed from `stack/.env` by the owner, stack rebuilt from `main` with the proxy detached from `egress-net`. Open: (1) the `registry_change` event for the revocation. (3) Deletion request: not applicable, owner decision 2026-10-21 on issue #19 (synthetic prompts only; the procedure is exercised at transfer with the client's provider).
 
 ## PD-44 — Vercel removed: the parcel frontend runs only on SERVER
 
@@ -521,6 +522,16 @@ gateway:8000 REACHABLE · everything else blocked (name resolution fails: the se
 ```
 **Pros.** The G4 property holds at the network layer, not only by the absence of credentials; the probe is a reusable isolation test. **Cons.** A manual `docker network connect` loses the service alias and a hand-made network lacks compose's labels, so only `compose up` from `main` makes it permanent (done on SERVER 2026-10-21).
 **Applied in.** `stack/docker-compose.yml`, `stack/cli/agl`. Verified on SERVER after `compose up` from `main`.
+**Status.** verified.
+
+## PD-47 — A gateway restart left events out of the WORM store
+
+**Problem.** The first scenario run with run correlation failed S12a: the verifier found a broken link at one event (content intact, `prev_hash` not matching the previous WORM event). Cause: the gateway was rebuilt several times that day; events still in the open in-memory segment were in the hot copy (Postgres) but never written to MinIO. Three events (seq 210–212) existed only in the hot copy.
+**Negative observation (2026-10-21):** `verify` → `result: fail`, `broken_links: [{index: 209, prev_link_ok: false, content_hash_ok: true}]`; `select count(*) from audit_event e where not exists (select 1 from audit_segment s where s.id = e.segment_id)` → 3.
+**Decision.** Two changes: the gateway flushes the open segment on shutdown (uvicorn shutdown hook), and at startup it re-emits any hot-copy events without a segment, in chain order, as WORM segments, then appends an `audit_recovery` event naming them. The hot copy is not the source of truth, but it is a durable buffer, so nothing is lost as long as Postgres survives; the production design adds a write-ahead to the object store before acknowledging the request.
+**Positive observation:** after the rebuild with the fix, orphan count 0, `verify` passes over the full chain, and the recovery event is itself in the chain.
+**Pros.** Restarts no longer create gaps; the gap that existed is closed with a recorded explanation rather than silently. **Cons.** Between an event's insert and the next flush, a hard crash of both the gateway and Postgres would lose it; the write-ahead above is the Phase 1 answer.
+**Applied in.** `stack/gateway/app/audit.py`, `main.py` (PR #32).
 **Status.** verified.
 
 ## Template for new entries
