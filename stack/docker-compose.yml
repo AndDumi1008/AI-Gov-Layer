@@ -7,6 +7,8 @@ networks:
     internal: true          # no route out and no published ports: reachable only via caddy; outbound only via egress-proxy
   egress-net: {}            # egress-proxy's way out; unused since PD-43
   edge-net: {}              # caddy + coredns, published on BIND_IP
+  sandbox-net:
+    internal: true          # agent sandboxes; the gateway is the only other member (issue #26, PD-45)
 
 volumes:
   pg-data: {}
@@ -118,7 +120,7 @@ services:
       postgres: { condition: service_healthy }
       minio-init: { condition: service_completed_successfully }
       opa: { condition: service_started }
-    networks: [agl-net]
+    networks: [agl-net, sandbox-net]   # sandbox-net: sandboxes reach the gateway and nothing else
 
   caddy:
     # The only entry point from the host/tailnet into agl-net. Internal networks cannot publish ports,
