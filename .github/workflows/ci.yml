@@ -4,9 +4,7 @@ name: ci
 
 on:
   pull_request:
-    # edited: ticking the AI checklist or adding the Ticket line re-runs ai-label and ticket (#17). Every job runs
-    # on an edit, none is skipped: a skipped required check counts as passed and would hide a failure on this commit.
-    types: [opened, synchronize, reopened, ready_for_review, edited]
+    types: [opened, synchronize, reopened, ready_for_review]   # not edited: ai-label and ticket are in pr-meta.yml
   merge_group:
   push:
     branches: [main]
@@ -88,46 +86,3 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # ratchet:actions/checkout@v4
       - run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.7 -no-color .github/workflows/*.yml pipeline/.github/workflows/*.yml
-
-  ai-label:
-    name: ai-label
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    permissions:
-      contents: read
-      pull-requests: write          # only this job; it runs no code from the PR
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # ratchet:actions/checkout@v4
-        with: { fetch-depth: 0 }
-      - name: Detect AI-Assisted / Co-Authored-By trailer, label, require the checklist
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR: ${{ github.event.pull_request.number }}
-          BASE: ${{ github.event.pull_request.base.sha }}
-          HEAD: ${{ github.event.pull_request.head.sha }}
-        run: |
-          if git log --format=%B "$BASE..$HEAD" | grep -Eiq '^(AI-Assisted|Co-Authored-By):.*(claude|copilot|codex|cursor|gemini)'; then
-            gh pr edit "$PR" --add-label ai-assisted
-            if gh pr view "$PR" --json body -q .body | grep -q '\- \[ \]'; then
-              echo "::error::AI-assisted checklist has unticked items (edit the PR description)"; exit 1
-            fi
-            echo "ai-assisted: labelled, checklist complete"
-          else
-            echo "no AI trailer found"
-          fi
-
-  ticket:
-    name: ticket
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    steps:
-      - name: Every change is traceable to a ticket (owner's working rule; docs/11 gap 12)
-        env:
-          BODY: ${{ github.event.pull_request.body }}
-          TITLE: ${{ github.event.pull_request.title }}
-        run: |
-          if printf '%s\n%s' "$TITLE" "$BODY" | grep -Eq '(^|[^A-Za-z0-9_/])(#[0-9]+|[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+)([^0-9]|$)'; then
-            echo "ticket reference found"
-          else
-            echo "::error::No ticket reference. Add 'Ticket: #<issue>' (or owner/repo#<issue>) to the PR description."; exit 1
-          fi
