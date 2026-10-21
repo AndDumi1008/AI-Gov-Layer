@@ -542,6 +542,38 @@ def scm_records(repo: str, authorization: str | None = Header(None)):
     i = _ident(authorization); require_role(i, "security_admin", "auditor", "platform_admin", "dpo")
     return {"repo": repo, "records": list(scm.existing_records(repo).values())}
 
+# ---------- enrolment: one-time codes inside the connection bundle (DoD; issue #12)
+@app.post("/agl/enroll/code")
+async def enroll_code(request: Request, authorization: str | None = Header(None)):
+    """A security admin issues a one-time enrolment code for a seeded identity; only its hash is stored."""
+    i = _ident(authorization); require_role(i, "security_admin", "platform_admin")
+    b = await request.json()
+    who = db.one("select id, subject from identity where subject=%s and status='active'", (b.get("user"),))
+    if not who:
+        raise HTTPException(404, {"code": "UNKNOWN_IDENTITY", "message": f"no active identity '{b.get('user')}'"})
+    code = "agl-" + uuid.uuid4().hex + uuid.uuid4().hex[:8]
+    ttl = int(b.get("ttl_hours") or 72)
+    db.run("insert into enrolment_code (code_hash, identity_id, issued_by, expires_at) values (%s,%s,%s, now() + make_interval(hours => %s))",
+           (hashlib.sha256(code.encode()).hexdigest(), who["id"], i["id"], ttl))
+    audit.chain.append("enrolment_issued", {"for": who["subject"], "issued_by": i["subject"], "ttl_hours": ttl, "code_sha256": hashlib.sha256(code.encode()).hexdigest()[:16] + "…"},
+                       actor_identity_id=i["id"], outcome="issued")
+    return {"user": who["subject"], "code": code, "expires_in_hours": ttl}
+
+@app.post("/agl/enroll")
+async def enroll(request: Request):
+    """Exchange a one-time code for a token (no prior token needed). Used once; a second use is refused and logged."""
+    b = await request.json()
+    h = hashlib.sha256((b.get("code") or "").encode()).hexdigest()
+    row = db.one("""select e.id, e.used_at, e.expires_at, i.subject, i.id as identity_id from enrolment_code e join identity i on i.id = e.identity_id where e.code_hash=%s""", (h,))
+    client = (request.client.host if request.client else None)
+    if not row or row["used_at"] or row["expires_at"] < dt.datetime.now(dt.timezone.utc):
+        audit.chain.append("enrolment_refused", {"reason": "unknown" if not row else ("used" if row["used_at"] else "expired"), "from": client, "code_sha256": h[:16] + "…"}, outcome="refused")
+        raise HTTPException(403, {"code": "ENROLMENT_REFUSED", "message": "code unknown, already used or expired"})
+    db.run("update enrolment_code set used_at = now(), used_from = %s where id = %s", (client, row["id"]))
+    tok = auth.mint(row["subject"])
+    audit.chain.append("enrolment_used", {"user": row["subject"], "from": client}, actor_identity_id=row["identity_id"], outcome="enrolled")
+    return {"user": row["subject"], "token": tok, "expires_in_hours": config.TOKEN_TTL_HOURS}
+
 # ---------- canaries executed by the gateway (DoD; issue #14)
 @app.get("/agl/canaries")
 def canaries_list(authorization: str | None = Header(None)):
