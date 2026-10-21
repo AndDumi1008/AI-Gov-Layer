@@ -21,7 +21,7 @@ python3 stack/cli/agl login --as dana && python3 stack/cli/agl ask "hello" -c IN
 | `ollama` (profile model) | local open-weight tier = `code-local` | `agl-net` |
 | `caddy`, `coredns` (profile edge) | TLS + hostnames on the tailnet | `edge-net` (+ `agl-net` for caddy) |
 
-Seeded identities (dev issuer, `agl login --as <user>`): `dana` developer · `teo` team lead · `mira` budget owner/finance · `ines` security admin · `pawel` DPO · `sven` developer + platform admin (team payments, tiny budget) · `newbie` no training.
+Seeded identities (dev issuer, `agl login --as <user>`): `dana` developer · `teo` team lead · `mira` budget owner/finance · `ines` security admin · `pawel` DPO · `sven` developer + platform admin (team payments, tiny budget) · `newbie` no training · `carla` client (product questions only, PD-51).
 
 Model weights: the in-stack `ollama` has no route to any registry; load weights with `deploy/server/pull-model.sh <model>` (one-off container sharing the volume). Local tier: set `AGL_LOCAL_BACKEND_URL=http://ollama:11434` and start with `--profile model`.
 

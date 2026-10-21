@@ -7,19 +7,30 @@ def test_secret_detected():
     r = dlp.scan("here is AKIAABCDEFGHIJKLMNOP and a password = supersecretvalue123")
     assert r.summary()["secrets"] >= 2
 
-def test_pii_redact_restore_roundtrip():
+def test_pii_detected_counts_types_not_values():
     text = "Contact ana.popescu@example.ro or +40 721 334 512, IBAN RO49AAAA1B31007593840000."
     r = dlp.scan(text)
     assert r.summary()["pii"] == 3
-    red, mapping = dlp.redact(text)
-    assert "example.ro" not in red and "[EMAIL_1]" in red and "[PHONE_1]" in red and "[IBAN_1]" in red
-    assert dlp.restore(red, mapping) == text
+    assert "example.ro" not in str(r.summary())
 
-def test_same_value_same_placeholder_across_messages():
-    m = {}
-    a, m = dlp.redact("mail ana.popescu@example.ro", m)
-    b, m = dlp.redact("again ana.popescu@example.ro and jonas@example.de", m)
-    assert a == "mail [EMAIL_1]" and b == "again [EMAIL_1] and [EMAIL_2]"
+def test_own_address_is_exempt_and_counted():
+    r = dlp.scan("reply to Dana@Example.test and ana.popescu@example.ro", own_values=("dana@example.test",))
+    s = r.summary()
+    assert s["pii"] == 1 and s["exempt"]["own_identity"] == 1
+
+def test_reserved_test_domains_are_exempt():
+    r = dlp.scan("qa@example.com ops@billing.test x@sub.example.org a@b.invalid")
+    s = r.summary()
+    assert s["pii"] == 0 and s["exempt"]["test_data"] == 4
+
+def test_lookalike_domains_are_not_test_data():
+    # example.ro, example.de and notexample.com are ordinary domains somebody can own
+    r = dlp.scan("ana@example.ro jonas@example.de bob@notexample.com eve@example.com.evil.ro")
+    assert r.summary()["pii"] == 4 and r.summary()["exempt"]["test_data"] == 0
+
+def test_phone_and_iban_are_never_test_data():
+    r = dlp.scan("+40 721 334 512 RO49AAAA1B31007593840000")
+    assert r.summary()["pii"] == 2 and r.summary()["exempt"] == {"own_identity": 0, "test_data": 0}
 
 def test_hash_chain_detects_edit():
     e1 = {"event_id": "1", "ts": "t", "type": "a", "prev_hash": "sha256:" + "0"*64}

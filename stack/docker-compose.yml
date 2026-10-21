@@ -121,6 +121,7 @@ services:
       - ./policy:/config/policy:ro
       - ./proxy/squid.conf:/config/proxy/squid.conf:ro
       - ./docker-compose.yml:/config/docker-compose.yml:ro
+      - ./catalog:/config/catalog:ro        # feature catalog for client product questions (PD-51)
       - ../.github/workflows:/config/workflows/repo:ro
       - ../pipeline/.github/workflows:/config/workflows/pipeline:ro
     depends_on:

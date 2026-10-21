@@ -20,6 +20,13 @@ block_reasons contains "DELEGATION_EXPIRED" if { input.identity.kind == "agent";
 block_reasons contains "REPO_QUARANTINED" if { input.repo; input.repo.ai_exposure != "allowed" }
 block_reasons contains "RESTRICTED_DATA" if input.classification == "RESTRICTED"
 block_reasons contains "SECRET_DETECTED" if input.dlp.secrets > 0
+# Personal data is blocked, not redacted (owner decision 2026-10-21, PD-49). The gateway has already set aside the
+# caller's own address and reserved test domains; anything left here is somebody's personal data.
+block_reasons contains "PII_DETECTED" if input.dlp.pii > 0
+# Clients ask product questions only, answered from the feature catalog (owner decision 2026-10-21, PD-51):
+# no free prompts, no repository context, no code. A client who is also a developer is treated as a developer.
+block_reasons contains "CLIENT_SCOPE" if { is_client; not product_qa }
+block_reasons contains "CLIENT_SCOPE" if { is_client; input.repo }
 block_reasons contains "MODEL_NOT_APPROVED" if { not model_usable }
 block_reasons contains "BUDGET_EXHAUSTED" if { input.budget.org; input.budget.org.pct >= 100 }
 block_reasons contains "BUDGET_EXHAUSTED" if { input.budget.team; input.budget.team.pct >= 100 }
@@ -28,6 +35,9 @@ block_reasons contains "CLASSIFICATION_CEILING" if { not reroute_needed; rank[in
 block_reasons contains "CLASSIFICATION_CEILING" if { reroute_needed; rank[input.classification] > rank[input.local_model.ceiling] }
 block_reasons contains "LOCAL_MODEL_UNAVAILABLE" if { reroute_needed; not input.local_model }
 block_reasons contains "PRODUCTION_CALLER" if input.client.environment == "production"
+
+is_client if { "client" in input.identity.roles; not "developer" in input.identity.roles }
+product_qa if input.request.mode == "product_qa"
 
 # A model is usable when approved/restricted, or an EU endpoint evaluating under an active model_enable exception.
 model_usable if input.model.status in {"approved", "restricted"}
@@ -39,7 +49,6 @@ exception_applied contains e.id if { input.model.status == "evaluating"; input.m
 reroute_needed if { input.classification == "CONFIDENTIAL"; input.model.residency != "EU_SELF_HOSTED" }
 
 # ---- soft outcomes
-redact_reasons contains "PII_REDACTED" if input.dlp.pii > 0
 warn_reasons contains "BUDGET_WARNING" if { input.budget.team; input.budget.team.pct >= 80; input.budget.team.pct < 100 }
 warn_reasons contains "BUDGET_WARNING_ORG" if { input.budget.org; input.budget.org.pct >= 80; input.budget.org.pct < 100 }
 warn_reasons contains "EXCEPTION_APPLIED" if count(exception_applied) > 0
@@ -47,16 +56,16 @@ warn_reasons contains "CLASSIFICATION_REROUTE" if reroute_needed
 
 outcome := "block" if count(block_reasons) > 0
 outcome := "reroute" if { count(block_reasons) == 0; reroute_needed }
-outcome := "redact" if { count(block_reasons) == 0; not reroute_needed; count(redact_reasons) > 0 }
-outcome := "allow" if { count(block_reasons) == 0; not reroute_needed; count(redact_reasons) == 0 }
+outcome := "allow" if { count(block_reasons) == 0; not reroute_needed }
 
+# Every request that reaches a model is stored in the content store, whatever its classification (owner decision
+# 2026-10-21, PD-50). Blocked requests are not: they hold the very secret or personal data that blocked them.
 default log_content := false
-log_content if { count(block_reasons) == 0; rank[input.classification] <= rank.INTERNAL }
+log_content if count(block_reasons) == 0
 
 decision := {
   "outcome": outcome,
-  "reasons": sort(array.concat(array.concat([r | some r in block_reasons], [r | some r in redact_reasons]), [r | some r in warn_reasons])),
-  "redact": count(redact_reasons) > 0,
+  "reasons": sort(array.concat([r | some r in block_reasons], [r | some r in warn_reasons])),
   "reroute_to": reroute_to,
   "exception_id": exception_id,
   "obligations": {"log_content": log_content},

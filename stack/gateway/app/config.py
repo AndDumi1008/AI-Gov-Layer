@@ -17,6 +17,10 @@ AUDIT_RETENTION_DAYS = int(env("AUDIT_RETENTION_DAYS", "1"))
 SEGMENT_MAX_EVENTS = int(env("AGL_SEGMENT_MAX_EVENTS", "20"))
 SEGMENT_MAX_SECONDS = int(env("AGL_SEGMENT_MAX_SECONDS", "60"))
 
+# Content store (PD-50): no default key. Without it every model request fails closed.
+CONTENT_KEY = os.environ.get("AGL_CONTENT_KEY")
+CONTENT_RETENTION_DAYS = int(env("AGL_CONTENT_RETENTION_DAYS", "30"))
+
 # EU only, no exception (PD-43): the self-hosted tier is the only backend; there is no external provider adapter.
 LOCAL_BACKEND_URL = env("AGL_LOCAL_BACKEND_URL", "http://mock-model:8000")
 LOCAL_MODEL = env("AGL_LOCAL_MODEL", "qwen2.5-coder:7b")
