@@ -74,6 +74,7 @@ IDs are `PD-xx`, chronological.
 | PD-43 | EU only, no exception: the US endpoint is revoked, all model work runs on the self-hosted tier (issue #19) | decided; applied in repo, not on SERVER | 2026-10-21 |
 | PD-45 | Sandboxes shared the governance network: could reach Postgres, MinIO, OPA and the egress proxy; now on a dedicated internal network with the gateway only (issue #26) | verified | 2026-10-21 |
 | PD-44 | Vercel removed: the parcel frontend runs only on SERVER, a static export in one web container per environment (issue #22) | applied | 2026-10-21 |
+| PD-45 | Parcel frontend hosting: read-only web container plus an SSH forced-command deploy account per environment; Caddy routes (issue #25) | applied | 2026-10-21 |
 
 ---
 
@@ -486,22 +487,16 @@ IDs are `PD-xx`, chronological.
 **Applied in.** `pipeline/.github/workflows/merge-candidate-paas.yml` and `release-paas.yml` (Vercel CLI and `VERCEL_*` secrets and variables replaced by `make web-build`, `web-deploy`, `web-rollback` with `WEB_DEPLOY_KEY`; the rollback audit event now carries the digest); `pipeline/README.md`; PoC §10.3 Tier 2 table, §10.6, §10.7; `.gitignore` here and in `parcel-app` (`.vercel/` removed). actionlint passes.
 **Status.** applied.
 
-## PD-45 — Sandboxes shared the governance network
+## PD-45 — Parcel frontend hosting: an SSH forced command is the only writer
 
-**Problem.** Probing from a live sandbox on SERVER (owner asked why parcel-app is quarantined; the sandbox is the G4 evidence) showed the sandbox could open TCP connections to `postgres:5432`, `minio:9000`, `opa:8181` and `egress-proxy:3128`, because `agl sandbox new` started it on `agl_agl-net`. The design (docs/02 §7, docs/07 §10.1) says a sandbox reaches the gateway and the package mirror only. Through the proxy, a developer's own API key would have bypassed DLP, budget and audit while the proxy still had a way out (before PD-43). Issue #26.
-**Negative observation (before, 2026-10-21):**
-```
-gateway:8000 REACHABLE · postgres:5432 REACHABLE · minio:9000 REACHABLE · opa:8181 REACHABLE · egress-proxy:3128 REACHABLE
-parcel-preview-api-1:3000 blocked · 100.109.138.14:4000 blocked · 1.1.1.1:443 blocked
-```
-**Decision.** A dedicated `internal` network `agl_sandbox-net`; the gateway is attached to it as a second network with its service alias; sandboxes start there. Nothing else joins it. The package mirror (gap 8, #13) will be the second member when it exists.
-**Positive observation (after, same day, same probe):**
-```
-gateway:8000 REACHABLE · everything else blocked (name resolution fails: the services do not exist on that network)
-```
-**Pros.** The G4 property ("no connectivity beyond the controlled path") now holds at the network layer, not only by the absence of credentials; the probe is a reusable isolation test. **Cons.** A manual `docker network connect` loses the service alias; only `compose up` gives it, which the test on SERVER had to work around.
-**Applied in.** `stack/docker-compose.yml` (network + gateway attachment), `stack/cli/agl` (`--network agl_sandbox-net`). On SERVER the network was created and the gateway attached by hand for the test; `compose up` from `main` makes it permanent.
-**Status.** verified.
+**Problem.** PD-44 named `make web-deploy`, `make web-rollback` and the secret `WEB_DEPLOY_KEY`, but nothing implemented them. Issue #25; the owner asked for the containers, the deploy service, the make targets and the Caddy routes, tested with a placeholder page, nothing on SERVER.
+**Fixes considered.** (a) Mount each environment's web volume into the runner containers. (b) An HTTP upload endpoint with a bearer token. (c) A `web-deploy` container per environment: sshd with one ed25519 key and a forced command that can only deploy, roll back or report, on the stack network.
+**Thought process.** (a) gives every job on the `server` runner, PR code included, write access to staging without any secret, losing the environment scoping PD-11 and PD-12 rely on. (b) is custom code in the most sensitive path. (c) is standard tooling, keeps the key an environment secret, and the network still lets only `server-release` reach production.
+**Decision.** (c). Before extracting, the forced command checks the received artifact against the digest and refuses links, absolute or `../` member paths, and artifacts without `index.html`. It unpacks into `releases/<hex>/`, writes `config.json` (an https backend URL only) and switches `current` with one rename; `previous` keeps the last release for rollback. One lock serialises deploys. The client pins the host key under the alias `web-deploy-<env>` and refuses an environment with no pinned key. The web container is Caddy on a read-only root filesystem with the volume mounted read-only.
+**Found on the way.** The AGL managed settings on the owner's Mac (`deploy/server/managed-settings.json`) deny `docker` and `curl` to Claude Code, so the session that wrote the container test could not run it, and did not route around the rule. The test runs as the `web-test` job in parcel-app CI and as `make web-test` for a human. Busybox `mv` and `tar` differ from GNU on replacing a symlink and on stripping member names, so the deploy image installs GNU coreutils, tar and findutils.
+**Pros.** Each key opens one environment and can do three things; nothing is published on a port; the refusals are tested, not assumed. **Cons.** A key per environment for the owner to create and rotate; the image is built from Alpine 3.20 packages pulled at build time; rollback toggles between the last two releases only.
+**Applied in.** `parcel-app` (`deploy/web/`, compose services `web` and `web-deploy`, `scripts/web-remote.sh`, make targets, `tests/web_test.sh`, CI job `web-test`); this repository: Caddy routes `preview.parcel`, `staging.parcel` and `parcel.<domain>` (`caddy validate` passes), PoC §10.6.
+**Status.** applied.
 
 ---
 
