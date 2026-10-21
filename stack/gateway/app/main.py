@@ -4,7 +4,7 @@ from decimal import Decimal
 from fastapi import FastAPI, Request, Header, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse, FileResponse, RedirectResponse
 import os as _os
-from . import config, db, auth, dlp, policy, ledger, audit, formats, providers, runs
+from . import config, db, auth, dlp, policy, ledger, audit, formats, providers, runs, scm
 
 app = FastAPI(title="AGL gateway", version="0.1.0")
 
@@ -520,6 +520,26 @@ def demo_reset(authorization: str | None = Header(None)):
                             "scope": ["budget_ledger", "topup_request", "delegated_identity", "repository_ai_gate:app-x"],
                             "note": "control plane reset to seed state; audit chain not modified"}, actor_identity_id=i["id"], outcome="reset")
     return {"reset": True, "event_id": ev["event_id"], "audit_events_total": db.one("select count(*) as n from audit_event")["n"]}
+
+# ---------- SCM reconciliation (G6; issue #7)
+@app.post("/agl/scm/reconcile")
+async def scm_reconcile(request: Request, authorization: str | None = Header(None)):
+    """The collector (agl reconcile) submits GitHub-derived merge records for one repository; the gateway
+    imports new ones as scm_merge events, flags changed or vanished ones, checks the gates, appends reconcile_result."""
+    i = _ident(authorization); require_role(i, "security_admin", "auditor", "platform_admin")
+    b = await request.json()
+    repo, records = b.get("repo"), b.get("records") or []
+    if not repo or not isinstance(records, list):
+        raise HTTPException(400, {"code": "BAD_REQUEST", "message": "repo and records[] required"})
+    for r in records:
+        if not r.get("merge_commit"):
+            raise HTTPException(400, {"code": "BAD_REQUEST", "message": "every record needs merge_commit"})
+    return scm.reconcile(repo, records, i["subject"], i["id"])
+
+@app.get("/agl/scm/records")
+def scm_records(repo: str, authorization: str | None = Header(None)):
+    i = _ident(authorization); require_role(i, "security_admin", "auditor", "platform_admin", "dpo")
+    return {"repo": repo, "records": list(scm.existing_records(repo).values())}
 
 # ---------- runs and configuration digests (DoD; issue #8)
 @app.post("/agl/run/start")

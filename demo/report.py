@@ -36,6 +36,8 @@ MAP = {  # scenario → (proof, control it demonstrates, ISO 27001:2022 Annex A)
  "S28": ("PR-3 EU only", "A non-EU endpoint cannot be registered even as evaluating", "A.5.23, A.5.31"),
  "S29": ("PR-3 EU only", "Self-hosted model down: the request fails, nothing falls back to another model", "A.5.23, A.8.14"),
  "S26": ("Policy as code", "Policy bundle unit tests pass", "A.8.9, A.8.25"),
+ "S27": ("G6 Traceability", "Chain reconciled against GitHub's merge records: AI-Gov-Layer", "A.5.33, A.8.15, A.8.32"),
+ "S27b":("G6 Traceability", "Chain reconciled against GitHub's merge records: parcel-app", "A.5.33, A.8.15, A.8.32"),
 }
 
 def parse(log: str):
@@ -85,6 +87,11 @@ def main(folder):
                     f"<table><tr><th>Item</th><th>Digest</th><th>Files</th></tr>{rows_d}{rows_i}</table>{drift_html}")
     else:
         run_html = "<p class=muted>No run record (run.json missing): the suite ran without a run id.</p>"
+    try:
+        recon_txt = (f / "reconcile.txt").read_text()
+        recon_html = "<pre class=mono>" + html.escape("\n".join(l for l in recon_txt.splitlines() if l.strip())) + "</pre><p class=muted>Each merge into main is matched by commit, actors, approvals, required checks and post-merge run; new ones are imported as <span class=mono>scm_merge</span> events, differences fail the run (<span class=mono>reconcile_result</span>).</p>"
+    except Exception:
+        recon_html = "<p class=muted>No reconciliation record in this run.</p>"
     print(f"""<!doctype html><meta charset=utf-8><title>AGL PoC evidence · {html.escape(f.name)}</title>
 <style>
 :root{{--bg:#f6f7f8;--fg:#17222c;--muted:#5b6b78;--line:#d6dde3;--ok:#1f7a3f;--bad:#b3261e;--skip:#8a6d1f}}
@@ -109,6 +116,7 @@ th{{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut
 <h2>Scenario results</h2>
 <table><tr><th>ID</th><th>What was demonstrated</th><th>Proof</th><th>ISO 27001 Annex A</th><th>Result</th></tr>{trs}</table>
 <h2>Configuration in force (config_snapshot)</h2>{run_html}
+<h2>Reconciliation with the source-control system</h2>{recon_html}
 <h2>Audit chain verification</h2>{chain_html}
 <h2>Stand-ins in this PoC</h2>
 <p class=muted>Dev token issuer instead of the corporate IdP · MinIO Object Lock instead of EU cloud object storage · regex DLP instead of Presidio · self-hosted model only, no external tier (EU only, no exception: PD-43) instead of an EU-region provider endpoint · one gateway instance. Production replacements are listed in docs/07 §7.</p>
