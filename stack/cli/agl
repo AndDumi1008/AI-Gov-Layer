@@ -100,6 +100,7 @@ def collect_github(repo: str, base: str, limit: int) -> list:
     return out
 
 def main():
+    global URL, _CTX
     p = argparse.ArgumentParser(prog="agl")
     sub = p.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("login", help="PoC: mint a dev token for a seeded user"); s.add_argument("--as", dest="user", required=True)
@@ -209,7 +210,6 @@ def main():
         if p.get("ca"): (home / "ca.crt").write_text(p["ca"])
         (home / "config.json").write_text(json.dumps({"url": p["url"], "ca_file": str(home / "ca.crt") if p.get("ca") else None, "user": p["user"]}, indent=1))
         (home / "agl").write_text(p["agl"]); (home / "agl").chmod(0o755)
-        global URL, _CTX
         URL = p["url"].rstrip("/"); _CTX = ssl.create_default_context(cafile=str(home / "ca.crt")) if p.get("ca") else None
         st, h, b = call("POST", "/agl/enroll", {"code": p["code"]}, auth=False)
         if st >= 400: out(st, b)
