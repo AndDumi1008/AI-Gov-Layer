@@ -128,12 +128,12 @@ try:
 except Exception as e: print('REFUSED',type(e).__name__,str(e)[:120])" 2>&1); echo "$r" >> "$LOG"; check "S25${h%%:*}" 'REFUSED\|HTTP 403' "$r"
 done
 
-say "S27 reconcile the chain against GitHub's own records (merges, gates, approvals, post-merge runs) — G6"
-r=$(as ines reconcile AndDumi1008/AI-Gov-Layer AndDumi1008/parcel-app 2>&1); echo "$r" >> "$LOG"; check S27 'AI-Gov-Layer: pass' "$r"; check S27b 'parcel-app: pass' "$r"
+say "S36 reconcile the chain against GitHub's own records (merges, gates, approvals, post-merge runs) — G6"
+r=$(as ines reconcile AndDumi1008/AI-Gov-Layer AndDumi1008/parcel-app 2>&1); echo "$r" >> "$LOG"; check S36 'AI-Gov-Layer: pass' "$r"; check S36b 'parcel-app: pass' "$r"
 echo "$r" > "$EV/reconcile.txt"
 
-say "S29 gateway-executed canaries: a violation refused and a clean input passed per guardrail, both observations in the chain"
-r=$(as ines canary run 2>&1); echo "$r" >> "$LOG"; check S29 "== canaries: pass" "$r"
+say "S37 gateway-executed canaries: a violation refused and a clean input passed per guardrail, both observations in the chain"
+r=$(as ines canary run 2>&1); echo "$r" >> "$LOG"; check S37 "== canaries: pass" "$r"
 
 say "S26 policy replay: 1000 synthetic decisions, count any non-EU route"
 # static policy test on the engine in use; the bind mount must be a path on THAT host (SERVER run: AGL_POLICY_PATH=D:/Projects/AI-Gov-Layer/stack/policy)

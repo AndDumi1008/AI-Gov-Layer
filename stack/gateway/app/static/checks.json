@@ -145,9 +145,9 @@
   "annex": "A.8.20, A.8.22"
  },
  "S27": {
-  "proof": "G6 Traceability",
-  "title": "Chain reconciled against GitHub's merge records: AI-Gov-Layer",
-  "annex": "A.5.33, A.8.15, A.8.32"
+  "proof": "PR-3 EU only",
+  "title": "The revoked US endpoint is refused by name; no exception applies",
+  "annex": "A.5.23, A.5.31"
  },
  "S28": {
   "proof": "PR-3 EU only",
@@ -155,19 +155,29 @@
   "annex": "A.5.23, A.5.31"
  },
  "S29": {
-  "proof": "All guardrails",
-  "title": "Gateway-executed canaries: negative refused, positive passed, both recorded",
-  "annex": "A.5.36, A.8.29"
+  "proof": "PR-3 EU only",
+  "title": "Self-hosted model down: the request fails, nothing falls back to another model",
+  "annex": "A.5.23, A.8.14"
  },
  "S26": {
   "proof": "Policy as code",
   "title": "Policy bundle unit tests pass",
   "annex": "A.8.9, A.8.25"
  },
- "S27b": {
+ "S36": {
+  "proof": "G6 Traceability",
+  "title": "Chain reconciled against GitHub's merge records: AI-Gov-Layer",
+  "annex": "A.5.33, A.8.15, A.8.32"
+ },
+ "S36b": {
   "proof": "G6 Traceability",
   "title": "Chain reconciled against GitHub's merge records: parcel-app",
   "annex": "A.5.33, A.8.15, A.8.32"
+ },
+ "S37": {
+  "proof": "All guardrails",
+  "title": "Gateway-executed canaries: negative refused, positive passed, both recorded",
+  "annex": "A.5.36, A.8.29"
  },
  "C-SECRET": {
   "proof": "G3",
