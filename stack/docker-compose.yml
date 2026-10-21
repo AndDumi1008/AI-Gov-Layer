@@ -8,7 +8,7 @@ networks:
   egress-net: {}            # egress-proxy's way out; unused since PD-43
   edge-net: {}              # caddy + coredns, published on BIND_IP
   sandbox-net:
-    internal: true          # agent sandboxes; the gateway is the only other member (issue #26, PD-45)
+    internal: true          # agent sandboxes; the gateway is the only other member (issue #26, PD-46)
 
 volumes:
   pg-data: {}
