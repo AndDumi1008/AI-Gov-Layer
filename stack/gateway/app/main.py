@@ -684,7 +684,7 @@ def audit_anchor(authorization: str | None = Header(None)):
 
 @app.get("/agl/audit/verify")
 def audit_verify(authorization: str | None = Header(None), simulate_tamper: bool = False):
-    i = _ident(authorization); require_role(i, "security_admin", "platform_admin", "auditor", "dpo")
+    _ident(authorization)   # read-only integrity check; any enrolled identity may verify (one-command start, PD-51)
     return audit.chain.verify(simulate_tamper=simulate_tamper)
 
 @app.get("/agl/repos")
