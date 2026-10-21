@@ -49,6 +49,51 @@ def out(status, body, headers=None):
             print("—", json.dumps(agl))
     sys.exit(0 if status < 400 else 1)
 
+def gh(*args):
+    r = subprocess.run(["gh", *args], capture_output=True, text=True)
+    if r.returncode:
+        sys.exit(f"gh {' '.join(args[:3])} failed: {r.stderr.strip()[:200]}")
+    return r.stdout
+
+def collect_github(repo: str, base: str, limit: int) -> list:
+    """GitHub's own account of every merge into `base`: PR, commits, actors, reviews, labels, required checks
+    on the merge commit, and the post-merge workflow run. Metadata only."""
+    required = []
+    for rs in json.loads(gh("api", f"repos/{repo}/rulesets", "--jq", "[.[] | .id]") or "[]"):
+        full = json.loads(gh("api", f"repos/{repo}/rulesets/{rs}"))
+        for rule in full.get("rules", []):
+            if rule.get("type") == "required_status_checks":
+                required += [c["context"] for c in rule["parameters"]["required_status_checks"]]
+    required = sorted(set(required))
+    prs = json.loads(gh("pr", "list", "--repo", repo, "--state", "merged", "--base", base, "--limit", str(limit),
+                        "--json", "number,title,author,mergedBy,mergeCommit,mergedAt,labels,reviews,baseRefName,headRefOid"))
+    out = []
+    for p in prs:
+        mc = (p.get("mergeCommit") or {}).get("oid")
+        if not mc: continue
+        # Check runs attach to the commit they ran on: PR-only jobs (ai-label, ticket) report on the PR head,
+        # the post-merge run on the merge commit. Take both; a reported success wins over skipped/none.
+        rank = {"success": 3, "failure": 2, "cancelled": 2, "timed_out": 2, "action_required": 2, "neutral": 1, "skipped": 1, None: 0}
+        checks = {}
+        for sha in (mc, p["headRefOid"]):
+            for cr in json.loads(gh("api", f"repos/{repo}/commits/{sha}/check-runs", "--jq", "[.check_runs[] | {name, conclusion}]") or "[]"):
+                if rank.get(cr.get("conclusion"), 0) > rank.get(checks.get(cr["name"]), 0):
+                    checks[cr["name"]] = cr.get("conclusion")
+        req_status = {c: checks.get(c) for c in required}
+        runs_ = json.loads(gh("run", "list", "--repo", repo, "--branch", base, "--commit", mc, "--json", "databaseId,conclusion,name", "--limit", "5") or "[]")
+        out.append({
+            "pr": p["number"], "title": p["title"], "merge_commit": mc, "head_sha": p["headRefOid"], "base_ref": p["baseRefName"],
+            "author": (p.get("author") or {}).get("login"), "merged_by": (p.get("mergedBy") or {}).get("login"), "merged_at": p.get("mergedAt"),
+            "labels": sorted(l["name"] for l in p.get("labels", [])),
+            "approvals": sorted({r["author"]["login"] for r in p.get("reviews", []) if r.get("state") == "APPROVED"}),
+            "required_checks": req_status,
+            "gates_green": bool(required) and all(v == "success" for v in req_status.values()),
+            "gates_red": sorted(c for c, v in req_status.items() if v in ("failure", "cancelled", "timed_out", "action_required")),
+            "gates_not_reported": sorted(c for c, v in req_status.items() if v is None),
+            "post_merge_run": {"id": runs_[0]["databaseId"], "conclusion": runs_[0]["conclusion"], "name": runs_[0]["name"]} if runs_ else None,
+        })
+    return out
+
 def main():
     p = argparse.ArgumentParser(prog="agl")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -70,6 +115,9 @@ def main():
     s = sub.add_parser("audit"); au = s.add_subparsers(dest="sub", required=True)
     au.add_parser("flush"); au.add_parser("anchor"); v = au.add_parser("verify"); v.add_argument("--simulate-tamper", action="store_true")
     sub.add_parser("demo-reset", help="PoC: reset control-plane demo state (logged; audit chain untouched)")
+    s = sub.add_parser("reconcile", help="collect GitHub merge records (gh) and reconcile them against the audit chain")
+    s.add_argument("repos", nargs="+", help="owner/name ...")
+    s.add_argument("--base", default="main"); s.add_argument("--limit", type=int, default=200)
     s = sub.add_parser("run", help="runs: start (config digests + drift), finish, show"); rr = s.add_subparsers(dest="sub", required=True)
     x = rr.add_parser("start"); x.add_argument("--label", default=""); x.add_argument("--no-images", action="store_true", help="skip docker image digests")
     x = rr.add_parser("finish"); x.add_argument("run_id"); x.add_argument("--result", choices=["pass", "fail"]); x.add_argument("--checks", help="JSON {passed, failed, skipped}")
@@ -124,6 +172,19 @@ def main():
         call("POST", f"/agl/sandbox/{b['sandbox_id']}/destroyed", {})
         sys.exit(rc)
     if args.cmd == "demo-reset": out(*call("POST", "/agl/admin/demo-reset", {})[::2])
+    if args.cmd == "reconcile":
+        overall = "pass"; results = []
+        for repo in args.repos:
+            recs = collect_github(repo, args.base, args.limit)
+            st, h, b = call("POST", "/agl/scm/reconcile", {"repo": repo, "records": recs})
+            if st >= 400: out(st, b)
+            results.append(b); overall = b["result"] if b["result"] == "fail" else overall
+            print(f"{repo}: {b['result']} · imported {b['imported']} · matched {b['matched']} · mismatches {len(b['mismatches'])} · gates red {len(b['gates_not_green'])} · gates not reported (historical) {len(b.get('gates_not_reported', []))} · self-merged {b['self_merged']}")
+            for g in b.get("gates_not_reported", []): print("   not reported", json.dumps(g))
+            for m in b["mismatches"]: print("   MISMATCH", json.dumps(m))
+            for g in b["gates_not_green"]: print("   GATE NOT GREEN", json.dumps(g))
+        print(json.dumps({"result": overall, "repos": results}, default=str)) if os.environ.get("AGL_JSON") else None
+        sys.exit(0 if overall == "pass" else 1)
     if args.cmd == "run":
         if args.sub == "start":
             images = {}

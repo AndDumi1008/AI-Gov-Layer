@@ -74,6 +74,7 @@ IDs are `PD-xx`, chronological.
 | PD-43 | EU only, no exception: the US endpoint is revoked, all model work runs on the self-hosted tier (issue #19) | decided; applied in repo, not on SERVER | 2026-10-21 |
 | PD-44 | Vercel removed: the parcel frontend runs only on SERVER, a static export in one web container per environment (issue #22) | applied | 2026-10-21 |
 | PD-45 | Parcel frontend hosting: read-only web container plus an SSH forced-command deploy account per environment; Caddy routes (issue #25) | applied | 2026-10-21 |
+| PD-48 | Evidence reconciled against GitHub's own records: collector + gateway judge; never-reported historical gates listed, not failed; every merge so far is a self-merge | verified | 2026-10-21 |
 | PD-47 | Gateway restarts lost unflushed audit events from WORM (hot copy kept them); flush on shutdown and recovery at startup | verified | 2026-10-21 |
 | PD-46 | Sandboxes shared the governance network: could reach Postgres, MinIO, OPA and the egress proxy; now on a dedicated internal network with the gateway only (issue #26) | verified | 2026-10-21 |
 
@@ -532,6 +533,16 @@ gateway:8000 REACHABLE · everything else blocked (name resolution fails: the se
 **Positive observation:** after the rebuild with the fix, orphan count 0, `verify` passes over the full chain, and the recovery event is itself in the chain.
 **Pros.** Restarts no longer create gaps; the gap that existed is closed with a recorded explanation rather than silently. **Cons.** Between an event's insert and the next flush, a hard crash of both the gateway and Postgres would lose it; the write-ahead above is the Phase 1 answer.
 **Applied in.** `stack/gateway/app/audit.py`, `main.py` (PR #32).
+**Status.** verified.
+
+## PD-48 — Reconciliation against the source-control system's own records
+
+**Problem.** Gap 2 of the audit (docs/11; issue #7): the chain proved integrity, not completeness, and nothing corroborated it. Two constraints shaped the design: GitHub-hosted runners cannot reach SERVER, and the gateway cannot reach GitHub (internal network, no egress since PD-43).
+**Decision.** A collector (`agl reconcile`), run by a security admin from a machine on the tailnet, fetches GitHub's account of every merge into `main`: PR number, merge and head commits, author, merger, approvals, labels, the conclusions of the required checks on the PR head and on the merge commit, and the post-merge workflow run. The gateway is the judge: it imports new merges as `scm_merge` events, compares existing ones field by field, flags changed or vanished records, fails on any required check that reported failure, and appends `reconcile_result`. Records carry a `record_version`; older ones are superseded by re-import rather than reported as mismatches. The suite runs it as S27 for both repositories; the report shows the verdict.
+**Findings on the first run (2026-10-21).** (a) Check runs attach to the commit they ran on: PR-only jobs report on the PR head, the post-merge run on the merge commit; the first collector read only the merge commit and judged every merge red. Fixed by reading both and letting a reported success win. (b) Five merges predate the `ticket` check (AI-Gov-Layer PRs 1–4, parcel-app PR 1): a control that did not exist cannot have been observed. Such gates are listed as "not reported (historical)", not failed; the register records when each check was introduced (PD-39, PD-42). (c) All 18 merges are self-merges: author = merger, permitted while required approvals = 0 (PD-39). The verdict counts them rather than failing them, so the brief's reviewer will see the number, not a green that hides it.
+**Not covered.** Provider audit logs: none exist in the replica (PD-41/PD-43); the self-hosted tier's "provider" is our own Ollama. Deploy events: no release workflow has run yet. Completeness of the gateway's own request events against a client-side log: open.
+**Pros.** Completeness is now asserted against an external system's records, in both directions, and the result is itself in the chain. **Cons.** The collector runs under a human identity on a schedule we choose, not as part of CI; a merge made and deleted between two runs would be missed by GitHub's API as well (the repository audit log is organisation-only on GitHub, PD-20).
+**Applied in.** `stack/gateway/app/scm.py`, endpoints, `stack/cli/agl reconcile`, suite S27, report. Verified on SERVER: 18 records imported, steady-state run matches all, exit 0.
 **Status.** verified.
 
 ## Template for new entries
