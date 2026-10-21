@@ -39,7 +39,17 @@ MESSAGES = {
 @app.on_event("startup")
 def _startup():
     db.open_pool()
-    audit.start()
+    audit.start()          # also recovers hot-copy events that never reached a WORM segment (PD-47)
+
+@app.on_event("shutdown")
+def _shutdown():
+    """Flush the open segment so a restart never leaves events only in the hot copy (PD-47)."""
+    try:
+        if audit.chain:
+            r = audit.chain.flush()
+            print("audit: flushed on shutdown:", r)
+    except Exception as e:  # noqa
+        print("audit: flush on shutdown failed:", e)
 
 @app.get("/healthz")
 def healthz():

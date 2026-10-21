@@ -71,6 +71,25 @@ class Chain:
         self.open_started = time.time()
         return {"segment_id": seg_id, "object_uri": uri, "events": len(events), "last_hash": last["hash"]}
 
+    def recover_orphans(self) -> list:
+        """Events that reached the hot copy but never a WORM segment (a restart with an open segment, before
+        PD-47). Re-emit them as segments in chain order, grouped by the segment id they were assigned."""
+        with self.lock:
+            rows = db.all_("""select body, segment_id from audit_event e
+                              where not exists (select 1 from audit_segment s where s.id = e.segment_id) order by seq""")
+            if not rows:
+                return []
+            results = []
+            groups: dict = {}
+            for r in rows:
+                groups.setdefault(str(r["segment_id"]), []).append(r["body"])
+            for seg_id, bodies in groups.items():
+                self.open = [dict(b, _segment_id=seg_id) for b in bodies]
+                res = self._flush_locked()
+                res["recovered"] = True
+                results.append(res)
+            return results
+
     def maybe_flush(self):
         if self.open and time.time() - self.open_started >= config.SEGMENT_MAX_SECONDS:
             self.flush()
@@ -150,6 +169,13 @@ chain: Chain | None = None
 def start():
     global chain
     chain = Chain()
+    try:
+        rec = chain.recover_orphans()
+        if rec:
+            print("audit: recovered orphan events into WORM segments:", rec)
+            chain.append("audit_recovery", {"segments": rec, "note": "hot-copy events without a WORM segment re-emitted at startup (PD-47)"}, outcome="recovered")
+    except Exception as e:  # noqa
+        print("audit: orphan recovery failed:", e)
     def loop():
         while True:
             time.sleep(5)
