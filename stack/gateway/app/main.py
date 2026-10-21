@@ -4,9 +4,18 @@ from decimal import Decimal
 from fastapi import FastAPI, Request, Header, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse, FileResponse, RedirectResponse
 import os as _os
-from . import config, db, auth, dlp, policy, ledger, audit, formats, providers
+from . import config, db, auth, dlp, policy, ledger, audit, formats, providers, runs
 
 app = FastAPI(title="AGL gateway", version="0.1.0")
+
+@app.middleware("http")
+async def _run_correlation(request: Request, call_next):
+    """Every event written while handling a request carries the run id from `x-agl-run`, if the caller sent one."""
+    token = runs.current_run.set(request.headers.get("x-agl-run") or None)
+    try:
+        return await call_next(request)
+    finally:
+        runs.current_run.reset(token)
 
 MESSAGES = {
     "SECRET_DETECTED": ("A credential pattern was found in your prompt. Remove it or replace it with a placeholder. If the key is real, rotate it now.", 403),
@@ -30,7 +39,17 @@ MESSAGES = {
 @app.on_event("startup")
 def _startup():
     db.open_pool()
-    audit.start()
+    audit.start()          # also recovers hot-copy events that never reached a WORM segment (PD-47)
+
+@app.on_event("shutdown")
+def _shutdown():
+    """Flush the open segment so a restart never leaves events only in the hot copy (PD-47)."""
+    try:
+        if audit.chain:
+            r = audit.chain.flush()
+            print("audit: flushed on shutdown:", r)
+    except Exception as e:  # noqa
+        print("audit: flush on shutdown failed:", e)
 
 @app.get("/healthz")
 def healthz():
@@ -501,6 +520,43 @@ def demo_reset(authorization: str | None = Header(None)):
                             "scope": ["budget_ledger", "topup_request", "delegated_identity", "repository_ai_gate:app-x"],
                             "note": "control plane reset to seed state; audit chain not modified"}, actor_identity_id=i["id"], outcome="reset")
     return {"reset": True, "event_id": ev["event_id"], "audit_events_total": db.one("select count(*) as n from audit_event")["n"]}
+
+# ---------- runs and configuration digests (DoD; issue #8)
+@app.post("/agl/run/start")
+async def run_start(request: Request, authorization: str | None = Header(None)):
+    """Open a run: record the digests of the configuration in force (policy bundle, egress allowlist, workflow
+    templates, compose file) plus client-reported image digests, and the drift from the previous snapshot."""
+    i = _ident(authorization)
+    b = await request.json() if await request.body() else {}
+    run_id = runs.new_run_id()
+    digests = runs.compute_digests()
+    images = b.get("images") or {}
+    prev = runs.previous_snapshot()
+    changes = runs.drift(prev, {**digests, "_images": images})
+    ev = audit.chain.append("config_snapshot", {"run_id": run_id, "label": b.get("label"), "started_by": i["subject"],
+                            "digests": digests, "images": images, "images_source": "client-reported (docker image inspect)" if images else None,
+                            "drift_from_previous": changes, "previous_snapshot": prev.get("event_id") if prev else None},
+                            actor_identity_id=i["id"], outcome="opened")
+    return {"run_id": run_id, "event_id": ev["event_id"], "digests": digests, "images": images, "drift": changes, "previous_snapshot": prev.get("event_id") if prev else None}
+
+@app.post("/agl/run/{run_id}/finish")
+async def run_finish(run_id: str, request: Request, authorization: str | None = Header(None)):
+    i = _ident(authorization)
+    b = await request.json() if await request.body() else {}
+    summary = runs.summarise(run_id)
+    ev = audit.chain.append("run_finished", {"run_id": run_id, "finished_by": i["subject"], "result": b.get("result"), "checks": b.get("checks"), "summary": summary},
+                            actor_identity_id=i["id"], outcome=b.get("result") or "finished")
+    return {"run_id": run_id, "event_id": ev["event_id"], "summary": summary}
+
+@app.get("/agl/run/{run_id}")
+def run_show(run_id: str, authorization: str | None = Header(None)):
+    _ident(authorization)
+    snap = db.one("select body from audit_event where type='config_snapshot' and body->>'run_id'=%s", (run_id,))
+    fin = db.one("select body from audit_event where type='run_finished' and body->>'run_id'=%s order by seq desc limit 1", (run_id,))
+    events = db.all_("select seq, event_id, ts, type, outcome, reasons from audit_event where body->>'run_id'=%s order by seq", (run_id,))
+    if not snap:
+        raise HTTPException(404, {"code": "NOT_FOUND", "message": "no such run"})
+    return {"run_id": run_id, "snapshot": snap["body"], "finished": fin["body"] if fin else None, "events": events}
 
 # ---------- audit operations
 @app.post("/agl/audit/flush")

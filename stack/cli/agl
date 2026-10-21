@@ -22,6 +22,8 @@ def call(method, path, body=None, auth=True, headers=None, raw=False):
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(URL + path, data=data, method=method)
     req.add_header("content-type", "application/json")
+    if os.environ.get("AGL_RUN"):
+        req.add_header("x-agl-run", os.environ["AGL_RUN"])   # run correlation: every event carries it
     if auth:
         req.add_header("authorization", "Bearer " + token())
     for k, v in (headers or {}).items():
@@ -68,6 +70,10 @@ def main():
     s = sub.add_parser("audit"); au = s.add_subparsers(dest="sub", required=True)
     au.add_parser("flush"); au.add_parser("anchor"); v = au.add_parser("verify"); v.add_argument("--simulate-tamper", action="store_true")
     sub.add_parser("demo-reset", help="PoC: reset control-plane demo state (logged; audit chain untouched)")
+    s = sub.add_parser("run", help="runs: start (config digests + drift), finish, show"); rr = s.add_subparsers(dest="sub", required=True)
+    x = rr.add_parser("start"); x.add_argument("--label", default=""); x.add_argument("--no-images", action="store_true", help="skip docker image digests")
+    x = rr.add_parser("finish"); x.add_argument("run_id"); x.add_argument("--result", choices=["pass", "fail"]); x.add_argument("--checks", help="JSON {passed, failed, skipped}")
+    x = rr.add_parser("show"); x.add_argument("run_id")
     args = p.parse_args()
 
     if args.cmd == "login":
@@ -118,6 +124,29 @@ def main():
         call("POST", f"/agl/sandbox/{b['sandbox_id']}/destroyed", {})
         sys.exit(rc)
     if args.cmd == "demo-reset": out(*call("POST", "/agl/admin/demo-reset", {})[::2])
+    if args.cmd == "run":
+        if args.sub == "start":
+            images = {}
+            if not args.no_images:
+                try:
+                    out_ = subprocess.run([os.environ.get("DOCKER", "docker"), "image", "inspect", "--format", "{{.RepoTags}} {{.Id}}",
+                                           "agl-gateway:latest", "agl-sandbox:latest", "openpolicyagent/opa:1.4.2-static", "postgres:16", "caddy:2.9", "ubuntu/squid:6.6-24.04_beta"],
+                                          capture_output=True, text=True, timeout=60)
+                    for line in out_.stdout.splitlines():
+                        tags, _, did = line.rpartition(" ")
+                        images[tags.strip("[]").split(",")[0]] = did
+                except Exception as e:  # noqa: docker not reachable → images stay empty and are reported as such
+                    images = {}
+            st, h, b = call("POST", "/agl/run/start", {"label": args.label, "images": images})
+            if st < 400:
+                print(b["run_id"]); print("# export AGL_RUN=" + b["run_id"] + "   drift items: " + str(len(b.get("drift", []))), file=sys.stderr)
+                sys.exit(0)
+            out(st, b)
+        if args.sub == "finish":
+            body = {"result": args.result}
+            if args.checks: body["checks"] = json.loads(args.checks)
+            out(*call("POST", f"/agl/run/{args.run_id}/finish", body)[::2])
+        if args.sub == "show": out(*call("GET", f"/agl/run/{args.run_id}")[::2])
     if args.cmd == "audit":
         if args.sub == "flush": out(*call("POST", "/agl/audit/flush", {})[::2])
         if args.sub == "anchor": out(*call("POST", "/agl/audit/anchor", {})[::2])

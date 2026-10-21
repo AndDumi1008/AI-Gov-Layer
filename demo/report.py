@@ -53,6 +53,9 @@ def main(folder):
     rows = parse(log)
     summary = re.search(r"== (\d+) passed, (\d+) failed", log)
     chain = {}
+    run = {}
+    try: run = json.loads((f / "run.json").read_text().split("\n—")[0])
+    except Exception: pass
     try: chain = json.loads((f / "chain-verification.json").read_text().split("\n—")[0])
     except Exception: pass
     passed = sum(r["result"] == "PASS" for r in rows); failed = sum(r["result"] == "FAIL" for r in rows); skipped = sum(r["result"] == "SKIP" for r in rows)
@@ -68,6 +71,20 @@ def main(folder):
                   f"delete attempts seen on {sum(1 for s in segs if s.get('delete_attempted'))} segment(s)</p>"
                   f"<p class=mono>head {html.escape(str(chain.get('head_hash','')))}</p>"
                   + "".join(f"<p class=mono>anchor {a['date']} through {a.get('through','')[:19]} · {a.get('segments','?')} segments · {'matches' if a['matches'] else 'MISMATCH'}</p>" for a in chain.get("anchors", [])))
+    snap = (run.get("snapshot") or {})
+    if snap:
+        rows_d = "".join(f"<tr><td>{html.escape(k)}</td><td class=mono>{html.escape(str(v.get('digest') or 'missing'))}</td><td>{v.get('files','')}</td></tr>" for k, v in (snap.get("digests") or {}).items())
+        rows_i = "".join(f"<tr><td>image {html.escape(k)}</td><td class=mono>{html.escape(str(v))}</td><td></td></tr>" for k, v in (snap.get("images") or {}).items())
+        d = snap.get("drift_from_previous") or []
+        drift_html = ("<p class=ok>No drift from the previous snapshot.</p>" if not d and snap.get("previous_snapshot") else
+                      "<p class=muted>First snapshot: nothing to compare.</p>" if not snap.get("previous_snapshot") else
+                      "<p class=bad>Drift since the previous snapshot:</p><ul>" + "".join(f"<li class=mono>{html.escape(x['item'])}: {html.escape(str(x['before']))} → {html.escape(str(x['after']))}</li>" for x in d) + "</ul>")
+        fin = run.get("finished") or {}
+        run_html = (f"<p>Run <span class=mono>{html.escape(run.get('run_id',''))}</span> · opened by {html.escape(str(snap.get('started_by')))} · "
+                    f"{(fin.get('summary') or {}).get('events','?')} events in the chain carry this run id · result {html.escape(str(fin.get('result','n/a')))}</p>"
+                    f"<table><tr><th>Item</th><th>Digest</th><th>Files</th></tr>{rows_d}{rows_i}</table>{drift_html}")
+    else:
+        run_html = "<p class=muted>No run record (run.json missing): the suite ran without a run id.</p>"
     print(f"""<!doctype html><meta charset=utf-8><title>AGL PoC evidence · {html.escape(f.name)}</title>
 <style>
 :root{{--bg:#f6f7f8;--fg:#17222c;--muted:#5b6b78;--line:#d6dde3;--ok:#1f7a3f;--bad:#b3261e;--skip:#8a6d1f}}
@@ -91,6 +108,7 @@ th{{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut
 <tr><td><b>PR-4 Immutable</b></td><td>Audit records cannot be altered or deleted, by anyone, and tampering is detectable.</td><td class=mono>S10–S12</td></tr></table>
 <h2>Scenario results</h2>
 <table><tr><th>ID</th><th>What was demonstrated</th><th>Proof</th><th>ISO 27001 Annex A</th><th>Result</th></tr>{trs}</table>
+<h2>Configuration in force (config_snapshot)</h2>{run_html}
 <h2>Audit chain verification</h2>{chain_html}
 <h2>Stand-ins in this PoC</h2>
 <p class=muted>Dev token issuer instead of the corporate IdP · MinIO Object Lock instead of EU cloud object storage · regex DLP instead of Presidio · self-hosted model only, no external tier (EU only, no exception: PD-43) instead of an EU-region provider endpoint · one gateway instance. Production replacements are listed in docs/07 §7.</p>

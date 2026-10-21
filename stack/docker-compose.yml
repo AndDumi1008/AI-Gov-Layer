@@ -115,7 +115,14 @@ services:
       ANCHOR_URL: http://minio-anchor:9000
       HTTPS_PROXY: http://egress-proxy:3128
       NO_PROXY: postgres,opa,minio,minio-anchor,mock-model,ollama,localhost,127.0.0.1
-    volumes: [issuer-keys:/keys]
+    volumes:
+      - issuer-keys:/keys
+      # configuration in force, hashed into every run's config_snapshot (issue #8); read-only, no secrets
+      - ./policy:/config/policy:ro
+      - ./proxy/squid.conf:/config/proxy/squid.conf:ro
+      - ./docker-compose.yml:/config/docker-compose.yml:ro
+      - ../.github/workflows:/config/workflows/repo:ro
+      - ../pipeline/.github/workflows:/config/workflows/pipeline:ro
     depends_on:
       postgres: { condition: service_healthy }
       minio-init: { condition: service_completed_successfully }
