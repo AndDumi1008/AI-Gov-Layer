@@ -1,5 +1,5 @@
 """AI Governance Layer — PoC gateway. One door for model calls: identity → registry → DLP → budget → policy → audit → route."""
-import json, uuid, hashlib, datetime as dt
+import json, uuid, hashlib, re, datetime as dt
 from decimal import Decimal
 from fastapi import FastAPI, Request, Header, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse, FileResponse, RedirectResponse
@@ -12,10 +12,11 @@ app = FastAPI(title="AGL gateway", version="0.1.0")
 async def _run_correlation(request: Request, call_next):
     """Every event written while handling a request carries the run id from `x-agl-run`, if the caller sent one."""
     token = runs.current_run.set(request.headers.get("x-agl-run") or None)
+    ctoken = runs.current_check.set(request.headers.get("x-agl-check") or None)
     try:
         return await call_next(request)
     finally:
-        runs.current_run.reset(token)
+        runs.current_run.reset(token); runs.current_check.reset(ctoken)
 
 MESSAGES = {
     "SECRET_DETECTED": ("A credential pattern was found in your prompt. Remove it or replace it with a placeholder. If the key is real, rotate it now.", 403),
@@ -540,6 +541,52 @@ async def scm_reconcile(request: Request, authorization: str | None = Header(Non
 def scm_records(repo: str, authorization: str | None = Header(None)):
     i = _ident(authorization); require_role(i, "security_admin", "auditor", "platform_admin", "dpo")
     return {"repo": repo, "records": list(scm.existing_records(repo).values())}
+
+# ---------- scoreboard, rendered only from the chain (DoD; issue #9)
+@app.get("/agl/scoreboard/{run_id}")
+def scoreboard_json(run_id: str, authorization: str | None = Header(None)):
+    _ident(authorization)
+    evs = db.all_("select seq, event_id, ts, type, outcome, reasons, body from audit_event where body->>'run_id' = %s order by seq", (run_id,))
+    if not evs:
+        raise HTTPException(404, {"code": "NOT_FOUND", "message": "no events for this run"})
+    snap = next((e["body"] for e in evs if e["type"] == "config_snapshot"), None)
+    fin = next((e["body"] for e in reversed(evs) if e["type"] == "run_finished"), None)
+    by_check: dict = {}
+    for e in evs:
+        c = e["body"].get("check")
+        if c:
+            by_check.setdefault(c, []).append({"seq": e["seq"], "event_id": str(e["event_id"]), "type": e["type"], "outcome": e["outcome"], "reasons": e["reasons"] or []})
+    results = {r["id"]: r for r in ((fin or {}).get("checks") or {}).get("results", [])}
+    checks = []
+    for cid in sorted(set(by_check) | set(results), key=lambda x: (int(re.sub(r"\D", "", x) or 0), x)):
+        checks.append({"id": cid, "result": results.get(cid, {}).get("result", "no result recorded"), "expect": results.get(cid, {}).get("expect"),
+                       "events": by_check.get(cid, [])})
+    verifs = [{"event_id": str(e["event_id"]), "seq": e["seq"], **{k: e["body"].get(k) for k in ("result", "events_verified", "segments", "broken_links", "hot_copy_mismatches", "anchors_matching", "anchors", "simulated_tamper")}} for e in evs if e["type"] == "chain_verified"]
+    recon = [{"event_id": str(e["event_id"]), "seq": e["seq"], **{k: e["body"].get(k) for k in ("repo", "result", "imported", "matched", "mismatches", "gates_not_green", "gates_not_reported", "self_merged")}} for e in evs if e["type"] == "reconcile_result"]
+    return {"run_id": run_id, "rendered_from_events": len(evs), "first_seq": evs[0]["seq"], "last_seq": evs[-1]["seq"],
+            "snapshot": {"event_id": next((str(e["event_id"]) for e in evs if e["type"] == "config_snapshot"), None), "digests": (snap or {}).get("digests"), "images": (snap or {}).get("images"),
+                         "drift": (snap or {}).get("drift_from_previous"), "previous": (snap or {}).get("previous_snapshot"), "label": (snap or {}).get("label")},
+            "finished": {"event_id": next((str(e["event_id"]) for e in reversed(evs) if e["type"] == "run_finished"), None), "result": (fin or {}).get("result"),
+                         "passed": ((fin or {}).get("checks") or {}).get("passed"), "failed": ((fin or {}).get("checks") or {}).get("failed")} if fin else None,
+            "checks": checks, "chain_verifications": verifs, "reconciliations": recon,
+            "unattributed_events": sum(1 for e in evs if not e["body"].get("check") and e["type"] not in ("config_snapshot", "run_finished"))}
+
+@app.get("/agl/runs")
+def runs_list(authorization: str | None = Header(None), limit: int = 20):
+    _ident(authorization)
+    return {"runs": db.all_("select body->>'run_id' as run_id, body->>'label' as label, ts, event_id from audit_event where type='config_snapshot' order by seq desc limit %s", (limit,))}
+
+@app.get("/scoreboard")
+def scoreboard_page():
+    return FileResponse(_os.path.join(_STATIC, "scoreboard.html"), media_type="text/html")
+
+@app.get("/scoreboard/{run_id}")
+def scoreboard_page_run(run_id: str):
+    return FileResponse(_os.path.join(_STATIC, "scoreboard.html"), media_type="text/html")
+
+@app.get("/agl/checks")
+def checks_map():
+    return FileResponse(_os.path.join(_STATIC, "checks.json"), media_type="application/json")
 
 # ---------- runs and configuration digests (DoD; issue #8)
 @app.post("/agl/run/start")
