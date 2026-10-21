@@ -24,6 +24,8 @@ def call(method, path, body=None, auth=True, headers=None, raw=False):
     req.add_header("content-type", "application/json")
     if os.environ.get("AGL_RUN"):
         req.add_header("x-agl-run", os.environ["AGL_RUN"])   # run correlation: every event carries it
+    if os.environ.get("AGL_CHECK"):
+        req.add_header("x-agl-check", os.environ["AGL_CHECK"])   # which check/canary produced the event
     if auth:
         req.add_header("authorization", "Bearer " + token())
     for k, v in (headers or {}).items():

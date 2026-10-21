@@ -16,9 +16,11 @@ pass=0; fail=0
 BIND_IP=$(grep -E '^BIND_IP=' "$ENV_FILE" | cut -d= -f2); BIND_IP=${BIND_IP:-127.0.0.1}
 PSQL="docker compose -f stack/docker-compose.yml exec -T postgres psql -U postgres"
 
-say(){ echo -e "\n== $*" | tee -a "$LOG"; }
+say(){ echo -e "\n== $*" | tee -a "$LOG"; export AGL_CHECK=$(echo "$1" | grep -oE "^S[0-9]+[ab]?" ); }
+RESULTS="[]"
 check(){ # check <name> <expected-substring> <actual>
-  if echo "$3" | grep -qi -- "$2"; then echo "   PASS $1" | tee -a "$LOG"; pass=$((pass+1)); else echo "   FAIL $1 (expected '$2')" | tee -a "$LOG"; echo "$3" | head -20 | tee -a "$LOG"; fail=$((fail+1)); fi
+  if echo "$3" | grep -qi -- "$2"; then echo "   PASS $1" | tee -a "$LOG"; pass=$((pass+1)); res=pass; else echo "   FAIL $1 (expected '$2')" | tee -a "$LOG"; echo "$3" | head -20 | tee -a "$LOG"; fail=$((fail+1)); res=fail; fi
+  RESULTS=$(python3 -c "import json,sys;r=json.loads(sys.argv[1]);r.append({'id':sys.argv[2],'result':sys.argv[3],'expect':sys.argv[4][:80]});print(json.dumps(r))" "$RESULTS" "$1" "$res" "$2")
 }
 as(){ # as <user> <cmd...>  → run CLI as user (separate token files)
   local u="$1"; shift; AGL_TOKEN_FILE="$EV/.tok-$u" $AGL login --as "$u" >/dev/null 2>&1; AGL_TOKEN_FILE="$EV/.tok-$u" $AGL "$@" 2>&1
@@ -142,7 +144,8 @@ docker compose -f stack/docker-compose.yml start "$SVC" >/dev/null 2>&1; sleep 3
 
 echo -e "\n== $pass passed, $fail failed. Evidence in $EV" | tee -a "$LOG"
 RESULT=$([ $fail -eq 0 ] && echo pass || echo fail)
-AGL_TOKEN_FILE="$EV/.tok-ines" $AGL run finish "$AGL_RUN" --result "$RESULT" --checks "{\"passed\":$pass,\"failed\":$fail}" > "$EV/run-finished.json" 2>/dev/null
+unset AGL_CHECK
+AGL_TOKEN_FILE="$EV/.tok-ines" $AGL run finish "$AGL_RUN" --result "$RESULT" --checks "$(python3 -c "import json,sys;print(json.dumps({'passed':$pass,'failed':$fail,'results':json.loads(sys.argv[1])}))" "$RESULTS")" > "$EV/run-finished.json" 2>/dev/null
 AGL_TOKEN_FILE="$EV/.tok-ines" $AGL run show "$AGL_RUN" > "$EV/run.json" 2>/dev/null
 as ines events --limit 5 > "$EV/last-events.json" 2>/dev/null; as ines audit verify > "$EV/chain-verification.json" 2>/dev/null
 [ $fail -eq 0 ]
